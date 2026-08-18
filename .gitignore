@@ -10,3 +10,4 @@ data/*.json
 .DS_Store
 postgres_data/
 redis_data/
+backup/*.dump
