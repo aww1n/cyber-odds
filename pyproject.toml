@@ -1,0 +1,62 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "cyber-odds-research"
+version = "0.1.0"
+description = "Leakage-safe collection and research of cyber sports odds"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+  "alembic>=1.15,<2",
+  "asyncpg>=0.30,<1",
+  "greenlet>=3.1,<4",
+  "httpx>=0.28,<1",
+  "pydantic-settings>=2.8,<3",
+  "pyyaml>=6.0,<7",
+  "redis>=5.2,<7",
+  "sqlalchemy>=2.0.40,<3",
+]
+
+[project.optional-dependencies]
+dev = [
+  "mypy>=1.15,<2",
+  "aiosqlite>=0.21,<1",
+  "pytest>=8.3,<9",
+  "ruff>=0.11,<1",
+  "types-pyyaml>=6.0,<7",
+]
+ml = [
+  "numpy>=2.2,<3",
+  "scikit-learn>=1.6,<2",
+]
+telegram = [
+  "aiogram>=3.20,<4",
+]
+
+[project.scripts]
+cyber-odds = "app.__main__:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/app"]
+
+[tool.pytest.ini_options]
+addopts = "-ra --strict-markers --strict-config"
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.ruff.lint.per-file-ignores]
+"src/app/database/migrations/versions/*.py" = ["E501", "I001", "UP007", "UP035"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+files = ["src", "tests"]
+plugins = ["pydantic.mypy"]

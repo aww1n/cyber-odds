@@ -1,0 +1,44 @@
+[
+  {
+    "externalId": "FI143170826",
+    "startDate": "2026-08-17T12:20:00Z",
+    "isCancelled": false,
+    "teamAName": "FRANCE",
+    "teamBName": "PORTUGAL",
+    "participantAName": "COSMOS",
+    "participantBName": "ALIBI",
+    "streamName": "Esoccer 4",
+    "tournamentName": "Esoccer H2H GG League",
+    "matchStatus": "MATCH_ENDED",
+    "teamAScore": 0,
+    "teamBScore": 3
+  },
+  {
+    "externalId": "FI142170826",
+    "startDate": "2026-08-17T12:16:00Z",
+    "isCancelled": false,
+    "teamAName": "MANCHESTER CITY",
+    "teamBName": "REAL MADRID",
+    "participantAName": "EXILE",
+    "participantBName": "HORIZON",
+    "streamName": "Esoccer 3",
+    "tournamentName": "Esoccer H2H GG League",
+    "matchStatus": "MATCH_ENDED",
+    "teamAScore": 3,
+    "teamBScore": 3
+  },
+  {
+    "externalId": "FI163170826",
+    "startDate": "2026-08-17T13:35:00Z",
+    "isCancelled": false,
+    "teamAName": "SPAIN",
+    "teamBName": "ENGLAND",
+    "participantAName": "ARCTIC",
+    "participantBName": "PROPHET",
+    "streamName": "Esoccer 4",
+    "tournamentName": "Esoccer H2H GG League",
+    "matchStatus": null,
+    "teamAScore": null,
+    "teamBScore": null
+  }
+]

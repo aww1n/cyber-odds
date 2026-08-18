@@ -1,0 +1,89 @@
+name: cyber-odds
+
+x-app: &app
+  build:
+    context: .
+  env_file:
+    - path: .env
+      required: false
+  environment:
+    DATABASE_URL: postgresql+asyncpg://cyber_odds:${POSTGRES_PASSWORD:-change_me}@postgres:5432/cyber_odds
+    REDIS_URL: redis://redis:6379/0
+    RAW_DATA_DIR: /app/data/raw
+  volumes:
+    - raw-data:/app/data/raw
+  restart: unless-stopped
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: cyber_odds
+      POSTGRES_USER: cyber_odds
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change_me}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cyber_odds -d cyber_odds"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  app:
+    <<: *app
+    command:
+      - sh
+      - -c
+      - alembic upgrade head && exec python -m app run --role odds
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-m", "app", "health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  worker:
+    <<: *app
+    command: ["python", "-m", "app", "run", "--role", "history"]
+    depends_on:
+      app:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-m", "app", "health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  telegram:
+    <<: *app
+    command: ["python", "-m", "app", "telegram"]
+    depends_on:
+      app:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-m", "app", "health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  postgres-data:
+  redis-data:
+  raw-data:

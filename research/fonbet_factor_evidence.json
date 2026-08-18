@@ -1,0 +1,39 @@
+{
+  "observed_at": "2026-08-17T16:17:00+03:00",
+  "status": "verified_core_only",
+  "api_observation": {
+    "raw_path": "data/raw/fonbet/2026/08/17/125841_430571Z_events_list_base_7e3259bda140_83f991e2.json",
+    "event_id": "67277027",
+    "event": "England (IcyVeins) - Germany (Djimbo88)",
+    "start_time": "2026-08-17T16:12:00+03:00",
+    "values": {
+      "921": 1.95,
+      "922": 3.50,
+      "923": 3.55,
+      "927@0": 1.45,
+      "928@0": 2.55,
+      "930@2.5": 2.35,
+      "931@2.5": 1.52
+    }
+  },
+  "official_page_observation": {
+    "url": "https://fonbet.com.cy/sports/football/category/118/134077/66897816",
+    "event": "England (IcyVeins) - Germany (Djimbo88)",
+    "column_order": ["1", "X", "2", "handicap_1", "handicap_2", "total", "over", "under"],
+    "values": [1.95, 3.50, 3.55, 1.45, 2.55, 2.5, 2.35, 1.53]
+  },
+  "mapping": {
+    "921": ["1x2", "P1"],
+    "922": ["1x2", "X"],
+    "923": ["1x2", "P2"],
+    "927": ["handicap", "F1(line)"],
+    "928": ["handicap", "F2(line)"],
+    "930": ["total", "TB(line)"],
+    "931": ["total", "TM(line)"]
+  },
+  "caveats": [
+    "The API host and official page use jurisdiction-specific event IDs.",
+    "The 1.52/1.53 difference is an odds movement between observations.",
+    "Every factor not listed in mapping remains unmapped."
+  ]
+}

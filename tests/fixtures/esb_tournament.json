@@ -1,0 +1,13 @@
+{
+  "id": 252708,
+  "marker": "E1",
+  "status_id": 4,
+  "token": "Лига Европы 2026-08-16",
+  "token_international": "Europa League 2026-08-16",
+  "location": {
+    "code": "location-1",
+    "color": "#008080",
+    "token": "Wembley",
+    "token_international": "Wembley"
+  }
+}

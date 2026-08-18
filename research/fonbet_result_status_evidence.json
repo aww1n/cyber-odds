@@ -1,0 +1,47 @@
+{
+  "observed_at": "2026-08-17T13:38:25Z",
+  "event_id": 67277469,
+  "competition": "FC 26. H2H LIGA-1. 2x4 min.",
+  "participants": [
+    "Argentina (JEKINHO)",
+    "France (TONARI)"
+  ],
+  "live_snapshot": {
+    "raw_path": "data/raw/fonbet/2026/08/17/132942_040238Z_events_list_base_2cb1ab22144b_82df5c59.json",
+    "score1": 3,
+    "score2": 0,
+    "score_comment": "(2-0)",
+    "timer_seconds": 5400,
+    "live_event_info_present": true,
+    "explicit_finished_status_present": false
+  },
+  "next_snapshot": {
+    "raw_path": "data/raw/fonbet/2026/08/17/133825_270608Z_events_list_base_1bab74a18cc1_ce5715b5.json",
+    "event_present": false,
+    "event_misc_present": false,
+    "live_event_info_present": false
+  },
+  "direct_results_page_checks": [
+    {
+      "url": "https://fonbet.com/results",
+      "http_status": 403,
+      "note": "redirected to an anti-bot protected mirror"
+    },
+    {
+      "url": "https://fon.bet/results",
+      "http_status": 200,
+      "note": "JavaScript anti-bot challenge, not results HTML or JSON"
+    },
+    {
+      "url": "https://fonbet.com.cy/results",
+      "http_status": 403,
+      "note": "Cloudflare challenge"
+    },
+    {
+      "url": "https://fonbet.kz/results",
+      "http_status": 502,
+      "note": "QRATOR gateway response"
+    }
+  ],
+  "conclusion": "The current line snapshot exposes a live score but no terminal result marker. Event disappearance is insufficient proof of settlement, so no Fonbet result collector is enabled from this contract."
+}

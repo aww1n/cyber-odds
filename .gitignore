@@ -1,0 +1,12 @@
+.env
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+data/raw/
+data/*.json
+*.log
+.DS_Store
+postgres_data/
+redis_data/

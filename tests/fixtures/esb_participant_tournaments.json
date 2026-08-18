@@ -1,0 +1,37 @@
+{
+  "totalPages": 8,
+  "tournaments": [
+    {
+      "id": 252799,
+      "marker": "J1",
+      "status_id": 3,
+      "token": "Ла Лига 2026-08-17",
+      "token_international": "LaLiga 2026-08-17",
+      "participant": {
+        "id": 895339,
+        "team": {
+          "id": 19,
+          "token": "Барселона",
+          "token_international": "Barcelona"
+        }
+      },
+      "results": {"W": 0, "L": 0, "D": 0, "position": 2, "winner": false}
+    },
+    {
+      "id": 252708,
+      "marker": "E1",
+      "status_id": 4,
+      "token": "Лига Европы 2026-08-16",
+      "token_international": "Europa League 2026-08-16",
+      "participant": {
+        "id": 894728,
+        "team": {
+          "id": 221,
+          "token": "Фенербахче",
+          "token_international": "Fenerbahce"
+        }
+      },
+      "results": {"W": 5, "L": 2, "D": 1, "position": 1, "winner": true}
+    }
+  ]
+}

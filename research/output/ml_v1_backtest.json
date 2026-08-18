@@ -1,0 +1,295 @@
+{
+  "model": "logistic_regression_v1",
+  "source": "uel_ef",
+  "feature_count": 440,
+  "candidates_seen": 2983,
+  "eligible_events": 2664,
+  "skipped_for_samples": 319,
+  "folds": [
+    {
+      "fold": 1,
+      "train_start": "2026-07-24T05:30:00+00:00",
+      "train_end": "2026-08-01T05:30:00+00:00",
+      "validation_start": "2026-08-01T05:30:00+00:00",
+      "validation_end": "2026-08-05T05:30:00+00:00",
+      "test_start": "2026-08-05T05:30:00+00:00",
+      "test_end": "2026-08-09T05:30:00+00:00",
+      "train_rows": 683,
+      "validation_rows": 478,
+      "test_rows": 480,
+      "validation_metrics": {
+        "uncalibrated": {
+          "predictions": 478,
+          "log_loss": 2.499478464863528,
+          "brier_score": 1.0210751991417517,
+          "calibration_error": 0.4535605785578554,
+          "accuracy": 0.3577405857740586
+        },
+        "platt": {
+          "predictions": 478,
+          "log_loss": 1.0901079790882284,
+          "brier_score": 0.6608428637274779,
+          "calibration_error": 0.014457826941803286,
+          "accuracy": 0.39748953974895396
+        },
+        "isotonic": {
+          "predictions": 478,
+          "log_loss": 1.0718569257743658,
+          "brier_score": 0.650273984405923,
+          "calibration_error": 0.012434512985511202,
+          "accuracy": 0.39539748953974896
+        }
+      },
+      "selected_calibration": "isotonic",
+      "test_metrics": {
+        "predictions": 480,
+        "log_loss": 1.1214007236083647,
+        "brier_score": 0.6750699561942888,
+        "calibration_error": 0.08047019282993023,
+        "accuracy": 0.37083333333333335
+      },
+      "reliability": [
+        {
+          "lower": 0.3,
+          "upper": 0.4,
+          "predictions": 217,
+          "average_confidence": 0.37327138664195475,
+          "observed_accuracy": 0.3548387096774194
+        },
+        {
+          "lower": 0.4,
+          "upper": 0.5,
+          "predictions": 101,
+          "average_confidence": 0.4362588551556351,
+          "observed_accuracy": 0.33663366336633666
+        },
+        {
+          "lower": 0.5,
+          "upper": 0.6,
+          "predictions": 98,
+          "average_confidence": 0.5171376976208354,
+          "observed_accuracy": 0.35714285714285715
+        },
+        {
+          "lower": 0.6,
+          "upper": 0.7,
+          "predictions": 64,
+          "average_confidence": 0.6388150456172081,
+          "observed_accuracy": 0.5
+        }
+      ]
+    },
+    {
+      "fold": 2,
+      "train_start": "2026-07-28T05:30:00+00:00",
+      "train_end": "2026-08-05T05:30:00+00:00",
+      "validation_start": "2026-08-05T05:30:00+00:00",
+      "validation_end": "2026-08-09T05:30:00+00:00",
+      "test_start": "2026-08-09T05:30:00+00:00",
+      "test_end": "2026-08-13T05:30:00+00:00",
+      "train_rows": 917,
+      "validation_rows": 480,
+      "test_rows": 480,
+      "validation_metrics": {
+        "uncalibrated": {
+          "predictions": 480,
+          "log_loss": 1.838941728510347,
+          "brier_score": 0.9218909681560675,
+          "calibration_error": 0.36408150599638933,
+          "accuracy": 0.35
+        },
+        "platt": {
+          "predictions": 480,
+          "log_loss": 1.0946773131967211,
+          "brier_score": 0.6640207524547158,
+          "calibration_error": 0.0051278948912524824,
+          "accuracy": 0.3625
+        },
+        "isotonic": {
+          "predictions": 480,
+          "log_loss": 1.0801474438025873,
+          "brier_score": 0.6553018217156016,
+          "calibration_error": 0.015897319230787393,
+          "accuracy": 0.3854166666666667
+        }
+      },
+      "selected_calibration": "isotonic",
+      "test_metrics": {
+        "predictions": 480,
+        "log_loss": 1.294948631136941,
+        "brier_score": 0.6652808233984638,
+        "calibration_error": 0.03596343260977993,
+        "accuracy": 0.35625
+      },
+      "reliability": [
+        {
+          "lower": 0.3,
+          "upper": 0.4,
+          "predictions": 382,
+          "average_confidence": 0.3687534220186096,
+          "observed_accuracy": 0.33507853403141363
+        },
+        {
+          "lower": 0.4,
+          "upper": 0.5,
+          "predictions": 86,
+          "average_confidence": 0.41589284730896614,
+          "observed_accuracy": 0.4418604651162791
+        },
+        {
+          "lower": 0.5,
+          "upper": 0.6,
+          "predictions": 11,
+          "average_confidence": 0.5286929886480147,
+          "observed_accuracy": 0.36363636363636365
+        },
+        {
+          "lower": 0.6,
+          "upper": 0.7,
+          "predictions": 1,
+          "average_confidence": 0.65019756497157,
+          "observed_accuracy": 1.0
+        }
+      ]
+    },
+    {
+      "fold": 3,
+      "train_start": "2026-08-01T05:30:00+00:00",
+      "train_end": "2026-08-09T05:30:00+00:00",
+      "validation_start": "2026-08-09T05:30:00+00:00",
+      "validation_end": "2026-08-13T05:30:00+00:00",
+      "test_start": "2026-08-13T05:30:00+00:00",
+      "test_end": "2026-08-17T05:30:00+00:00",
+      "train_rows": 958,
+      "validation_rows": 480,
+      "test_rows": 500,
+      "validation_metrics": {
+        "uncalibrated": {
+          "predictions": 480,
+          "log_loss": 2.251713723956085,
+          "brier_score": 1.0589133575896972,
+          "calibration_error": 0.46510965564045226,
+          "accuracy": 0.29583333333333334
+        },
+        "platt": {
+          "predictions": 480,
+          "log_loss": 1.0758379531544233,
+          "brier_score": 0.6515297758318577,
+          "calibration_error": 0.0004570036534205524,
+          "accuracy": 0.42083333333333334
+        },
+        "isotonic": {
+          "predictions": 480,
+          "log_loss": 1.0627755658814129,
+          "brier_score": 0.644097269615061,
+          "calibration_error": 0.010711643969643948,
+          "accuracy": 0.44166666666666665
+        }
+      },
+      "selected_calibration": "isotonic",
+      "test_metrics": {
+        "predictions": 500,
+        "log_loss": 1.710892324076958,
+        "brier_score": 0.69067401263688,
+        "calibration_error": 0.1022038550705201,
+        "accuracy": 0.346
+      },
+      "reliability": [
+        {
+          "lower": 0.3,
+          "upper": 0.4,
+          "predictions": 12,
+          "average_confidence": 0.39503042706072217,
+          "observed_accuracy": 0.25
+        },
+        {
+          "lower": 0.4,
+          "upper": 0.5,
+          "predictions": 441,
+          "average_confidence": 0.43404872851603105,
+          "observed_accuracy": 0.3469387755102041
+        },
+        {
+          "lower": 0.5,
+          "upper": 0.6,
+          "predictions": 33,
+          "average_confidence": 0.5517241670708191,
+          "observed_accuracy": 0.3333333333333333
+        },
+        {
+          "lower": 0.6,
+          "upper": 0.7,
+          "predictions": 9,
+          "average_confidence": 0.6341397135526456,
+          "observed_accuracy": 0.4444444444444444
+        },
+        {
+          "lower": 0.7,
+          "upper": 0.8,
+          "predictions": 4,
+          "average_confidence": 0.73297954991271,
+          "observed_accuracy": 0.25
+        },
+        {
+          "lower": 0.8,
+          "upper": 0.9,
+          "predictions": 1,
+          "average_confidence": 0.8999999999999999,
+          "observed_accuracy": 1.0
+        }
+      ]
+    }
+  ],
+  "out_of_sample": {
+    "predictions": 1460,
+    "log_loss": 1.3803382550111136,
+    "brier_score": 0.6771954661116173,
+    "calibration_error": 0.06974248809137416,
+    "accuracy": 0.35753424657534244
+  },
+  "reliability": [
+    {
+      "lower": 0.3,
+      "upper": 0.4,
+      "predictions": 611,
+      "average_confidence": 0.37087408058452,
+      "observed_accuracy": 0.3404255319148936
+    },
+    {
+      "lower": 0.4,
+      "upper": 0.5,
+      "predictions": 628,
+      "average_confidence": 0.4319178638771655,
+      "observed_accuracy": 0.35828025477707004
+    },
+    {
+      "lower": 0.5,
+      "upper": 0.6,
+      "predictions": 142,
+      "average_confidence": 0.5260705264458244,
+      "observed_accuracy": 0.352112676056338
+    },
+    {
+      "lower": 0.6,
+      "upper": 0.7,
+      "predictions": 74,
+      "average_confidence": 0.6384002419790095,
+      "observed_accuracy": 0.5
+    },
+    {
+      "lower": 0.7,
+      "upper": 0.8,
+      "predictions": 4,
+      "average_confidence": 0.73297954991271,
+      "observed_accuracy": 0.25
+    },
+    {
+      "lower": 0.8,
+      "upper": 0.9,
+      "predictions": 1,
+      "average_confidence": 0.8999999999999999,
+      "observed_accuracy": 1.0
+    }
+  ],
+  "note": "Each fold fits on train, chooses uncalibrated/Platt/isotonic by validation LogLoss, and scores once on the later test interval. No betting ROI is claimed without verified historical market odds."
+}

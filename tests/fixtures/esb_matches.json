@@ -1,0 +1,60 @@
+[
+  {
+    "id": 2226225,
+    "date": "2026-08-16T05:00:00Z",
+    "status_id": 3,
+    "tournament": {
+      "id": 252708,
+      "token": "Лига Европы 2026-08-16",
+      "token_international": "Europa League 2026-08-16",
+      "status_id": 4
+    },
+    "participant1": {
+      "id": 894728,
+      "nickname": "Artrom",
+      "score": 5,
+      "team": {
+        "id": 221,
+        "token": "Фенербахче",
+        "token_international": "Fenerbahce"
+      },
+      "prevPeriodsScores": ["3"]
+    },
+    "participant2": {
+      "id": 894731,
+      "nickname": "Revange",
+      "score": 4,
+      "team": {
+        "id": 183,
+        "token": "Астон Вилла",
+        "token_international": "Aston Villa"
+      },
+      "prevPeriodsScores": ["2"]
+    }
+  },
+  {
+    "id": 2226226,
+    "date": "2026-08-16T05:15:00Z",
+    "status_id": 3,
+    "participant1": {
+      "id": 894732,
+      "nickname": "BlackStar98",
+      "score": 2,
+      "team": {
+        "id": 49,
+        "token": "Рома",
+        "token_international": "Roma"
+      }
+    },
+    "participant2": {
+      "id": 894728,
+      "nickname": "Artrom",
+      "score": 2,
+      "team": {
+        "id": 221,
+        "token": "Фенербахче",
+        "token_international": "Fenerbahce"
+      }
+    }
+  }
+]

@@ -1,0 +1,53 @@
+{
+  "tour_blocks": {
+    "games": [
+      {
+        "id": "115555",
+        "id_sl": "4538930",
+        "tour_id_sl": "226610",
+        "date_time": "2026-08-15 08:30:00",
+        "team1_id": "80066",
+        "team2_id": "124686",
+        "player1_id": "183192",
+        "player2_id": "182721",
+        "score_team1": "2",
+        "score_team2": "0",
+        "periods": "(2-0)",
+        "state": "finished",
+        "updated_at": "2026-08-15 06:18:35",
+        "player_1_id_sl": "183192",
+        "player_1_title_en": "Paulblack17",
+        "player_2_id_sl": "182721",
+        "player_2_title_en": "Sheba",
+        "team_1_id_sl": "80066",
+        "team_1_title_ru": "Аргентина",
+        "team_1_title_en": "Argentina",
+        "team_2_id_sl": "124686",
+        "team_2_title_ru": "Италия",
+        "team_2_title_en": "Italy"
+      },
+      {
+        "id": "115556",
+        "id_sl": "4538931",
+        "tour_id_sl": "226610",
+        "date_time": "2026-08-15 08:44:00",
+        "score_team1": "0",
+        "score_team2": "1",
+        "state": "finished",
+        "player_1_id_sl": "186218",
+        "player_1_title_en": "Shooter",
+        "player_2_id_sl": "204778",
+        "player_2_title_en": "Jakub421",
+        "team_1_id_sl": "124690",
+        "team_1_title_ru": "Нидерланды",
+        "team_1_title_en": "Netherlands",
+        "team_2_id_sl": "124687",
+        "team_2_title_ru": "Англия",
+        "team_2_title_en": "England"
+      }
+    ],
+    "game": {},
+    "history_personal_meetings": [],
+    "games_group": []
+  }
+}

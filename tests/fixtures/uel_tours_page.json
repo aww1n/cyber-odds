@@ -1,0 +1,23 @@
+{
+  "items": [
+    {
+      "id": "7981",
+      "id_sl": "226610",
+      "date_time": "2026-08-15 08:30:00",
+      "title_ru": "Stream 2 Тур №1",
+      "title_en": "Stream 2 Tour №1",
+      "country": "CZ",
+      "state": "finished"
+    },
+    {
+      "id": "8011",
+      "id_sl": "227001",
+      "date_time": "2026-08-18 21:36:00",
+      "title_ru": "Stream 2 Тур №4",
+      "title_en": "Stream 2 Tour №4",
+      "country": "CZ",
+      "state": "upcoming"
+    }
+  ],
+  "total_items": 8003
+}
