@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from decimal import Decimal
 
 from app.backtest.engine import BacktestRun
 
@@ -14,11 +15,13 @@ class BacktestMetrics:
     losses: int
     returns: int
     unsettled: int
-    total_stake: float
-    profit: float
-    roi_percent: float
-    average_odds: float
-    max_drawdown: float
+    hit_rate_percent: Decimal
+    total_stake: Decimal
+    profit: Decimal
+    roi_percent: Decimal
+    yield_percent: Decimal
+    average_odds: Decimal
+    max_drawdown: Decimal
     longest_losing_streak: int
     brier_score: float | None
     log_loss: float | None
@@ -27,8 +30,14 @@ class BacktestMetrics:
 def calculate_backtest_metrics(run: BacktestRun) -> BacktestMetrics:
     bets = run.bets
     settled = [item for item in bets if item.settlement is not None]
-    total_stake = sum(item.settlement.stake for item in settled if item.settlement)
-    profit = sum(item.settlement.profit for item in settled if item.settlement)
+    total_stake = sum(
+        (item.settlement.stake for item in settled if item.settlement),
+        Decimal("0"),
+    )
+    profit = sum(
+        (item.settlement.profit for item in settled if item.settlement),
+        Decimal("0"),
+    )
     wins = sum(item.settlement is not None and item.settlement.outcome == "win" for item in bets)
     losses = sum(
         item.settlement is not None and item.settlement.outcome == "loss" for item in bets
@@ -36,9 +45,16 @@ def calculate_backtest_metrics(run: BacktestRun) -> BacktestMetrics:
     returns = sum(
         item.settlement is not None and item.settlement.outcome == "return" for item in bets
     )
-    cumulative = 0.0
-    peak = 0.0
-    max_drawdown = 0.0
+    decisive = wins + losses
+    hit_rate = (
+        Decimal("100") * Decimal(wins) / Decimal(decisive)
+        if decisive
+        else Decimal("0")
+    )
+    roi = Decimal("100") * profit / total_stake if total_stake else Decimal("0")
+    cumulative = Decimal("0")
+    peak = Decimal("0")
+    max_drawdown = Decimal("0")
     losing_streak = 0
     longest_losing_streak = 0
     for item in settled:
@@ -53,7 +69,7 @@ def calculate_backtest_metrics(run: BacktestRun) -> BacktestMetrics:
             losing_streak = 0
 
     binary = [
-        (item.metrics.probability, 1.0 if item.settlement.outcome == "win" else 0.0)
+        (float(item.metrics.probability), 1.0 if item.settlement.outcome == "win" else 0.0)
         for item in settled
         if item.settlement is not None and item.settlement.outcome != "return"
     ]
@@ -81,10 +97,20 @@ def calculate_backtest_metrics(run: BacktestRun) -> BacktestMetrics:
         losses=losses,
         returns=returns,
         unsettled=len(bets) - len(settled),
+        hit_rate_percent=hit_rate,
         total_stake=total_stake,
         profit=profit,
-        roi_percent=100 * profit / total_stake if total_stake else 0.0,
-        average_odds=(sum(item.metrics.odds for item in bets) / len(bets) if bets else 0.0),
+        roi_percent=roi,
+        yield_percent=roi,
+        average_odds=(
+            sum(
+                (item.metrics.odds for item in bets),
+                Decimal("0"),
+            )
+            / len(bets)
+            if bets
+            else Decimal("0")
+        ),
         max_drawdown=max_drawdown,
         longest_losing_streak=longest_losing_streak,
         brier_score=brier,

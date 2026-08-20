@@ -45,9 +45,9 @@
 - `postgres`: основная база;
 - `redis`: health/runtime dependency и база для дальнейшей очереди/coordination.
 
-У всех сервисов есть restart policy и healthcheck. В текущем окружении Compose schema
-проверена, но образ не был собран: локальный Docker socket не запущен. Это нужно повторить
-после запуска Docker Desktop.
+У всех сервисов есть restart policy и healthcheck. Перед миграцией production-БД нужен
+`pg_dump`; после обновления проверьте единственную Alembic head и запустите read-only
+аудит целостности.
 
 ## Ручные one-shot команды
 
@@ -56,10 +56,27 @@ uv run alembic upgrade head
 uv run python -m app collect
 uv run python -m app normalize --source fonbet
 uv run python -m app match-events --historical-source uel_ef
+uv run python -m app db-audit
+uv run python -m app build-corridors
+uv run python -m app corridor-progress
+uv run python -m app corridor-stats
 uv run python -m app predict
 uv run python -m app settle
 uv run python -m app health
 ```
+
+## Семантика времени результатов
+
+- `results.source_updated_at` заполняется только timestamp, который сообщил
+  исторический источник.
+- `results.observed_at` — первое время получения RAW payload, в котором система
+  увидела финальный результат.
+- `results.settled_at` не синтезируется из `observed_at`: если источник не даёт
+  официальный settlement timestamp, поле остаётся `NULL`. Для leakage cutoff
+  используется первое доступное из подтверждённых source/observation timestamps.
+
+Начиная с revision `7a2c91d4e6b8`, старые `TB(line)`/`TM(line)` snapshots безопасно
+нормализуются в `selection=over/under`; сама линия остаётся в отдельном поле `line`.
 
 ## Режим алертов
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -73,9 +74,11 @@ async def test_repository_upserts_events_but_appends_every_odds_snapshot(tmp_pat
             .limit(1)
         )
 
-    assert event_count == 2
-    assert odds_count == len(catalog.quotes) * 2
-    assert raw_count == 2
-    assert mapped_total is not None
-    assert mapped_total.selection == "TB(2.5)"
+        assert event_count == 2
+        assert odds_count == len(catalog.quotes) * 2
+        assert raw_count == 2
+        assert mapped_total is not None
+        # Modern normalized format: selection="over" with line stored separately
+        assert mapped_total.selection == "over"
+        assert mapped_total.line == Decimal("2.5")
     await engine.dispose()

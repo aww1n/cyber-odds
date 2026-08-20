@@ -18,6 +18,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -220,6 +221,7 @@ class Result(Base):
     __table_args__ = (
         CheckConstraint("winner IN ('P1', 'X', 'P2')", name="winner"),
         Index("ix_results_event_id", "event_id", unique=True),
+        Index("ix_results_settled_at", "settled_at"),
     )
 
     id: Mapped[int] = mapped_column(BIGINT_ID, primary_key=True, autoincrement=True)
@@ -229,14 +231,17 @@ class Result(Base):
     winner: Mapped[str] = mapped_column(String(2), nullable=False)
     is_draw: Mapped[bool] = mapped_column(Boolean, nullable=False)
     total: Mapped[int] = mapped_column(Integer, nullable=False)
-    # Some historical APIs expose the final score but not the moment it was settled.
-    # NULL is preferable to inventing a timestamp from the collection time.
+    # Canonical availability time of a source-confirmed final result. If the
+    # source exposes an update time it is used; otherwise this is the first raw
+    # payload in which the final score was observed. It is not represented as a
+    # bookmaker's internal settlement timestamp.
     settled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # Timestamp reported by the historical source for its last result-row update.
-    # This is evidence of availability, but is not claimed as bookmaker settlement.
     source_updated_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), index=True
     )
+    # First payload receipt that confirmed the final score; retained separately
+    # for provenance and as an availability fallback.
     observed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), index=True
     )
@@ -265,6 +270,14 @@ class OddsSnapshot(Base):
         Index("ix_odds_snapshots_event_id", "event_id"),
         Index("ix_odds_snapshots_received_at", "received_at"),
         Index("ix_odds_event_market_received", "event_id", "market_id", "received_at"),
+        Index(
+            "ix_odds_contract_received",
+            "event_id",
+            "market_id",
+            "selection",
+            "line",
+            "received_at",
+        ),
     )
 
     id: Mapped[int] = mapped_column(BIGINT_ID, primary_key=True, autoincrement=True)
@@ -338,6 +351,10 @@ class Signal(Base):
     stake_mode: Mapped[str | None] = mapped_column(String(32))
     suggested_stake: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
     bet_multiplier: Mapped[Decimal | None] = mapped_column(Numeric(8, 4))
+    # Bankroll management fields
+    bankroll_at_signal: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    stake_percent: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
+    stake_amount: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
     filter_reasons: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
     telegram_message_id: Mapped[str | None] = mapped_column(String(128))
     # An unsent recommendation must not be delivered after its quoted odds are stale
@@ -374,10 +391,29 @@ class EventMatch(Base):
         CheckConstraint("status IN ('matched', 'ambiguous', 'rejected')", name="status"),
         UniqueConstraint("source_event_id", "bookmaker_event_id", name="uq_event_match_pair"),
         Index("ix_event_matches_status", "status"),
+        Index("ix_event_matches_source_status", "source_event_id", "status"),
+        Index("ix_event_matches_bookmaker_status", "bookmaker_event_id", "status"),
+        Index(
+            "ux_event_matches_matched_source",
+            "source_event_id",
+            unique=True,
+            postgresql_where=text("status = 'matched'"),
+            sqlite_where=text("status = 'matched'"),
+        ),
+        Index(
+            "ux_event_matches_matched_bookmaker",
+            "bookmaker_event_id",
+            unique=True,
+            postgresql_where=text("status = 'matched'"),
+            sqlite_where=text("status = 'matched'"),
+        ),
     )
 
     id: Mapped[int] = mapped_column(BIGINT_ID, primary_key=True, autoincrement=True)
+    # The historical provider is always on the source side; its Result.event_id
+    # is the authoritative outcome used for settlement and corridor observations.
     source_event_id: Mapped[int] = mapped_column(ForeignKey("events.id"), nullable=False)
+    # The bookmaker side owns immutable pre-match OddsSnapshot rows.
     bookmaker_event_id: Mapped[int] = mapped_column(ForeignKey("events.id"), nullable=False)
     confidence: Mapped[Decimal] = mapped_column(Numeric(5, 4), nullable=False)
     status: Mapped[str] = mapped_column(String(16), nullable=False)
@@ -405,3 +441,150 @@ class ParserRun(Base):
     events_rejected: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     latency_ms: Mapped[int | None] = mapped_column(Integer)
     raw_payload_id: Mapped[int | None] = mapped_column(ForeignKey("raw_payloads.id"))
+
+
+class CorridorObservation(Base):
+    """One immutable-result observation for a matched pre-match bookmaker quote.
+
+    The row is mutable only while choosing the final pre-match snapshot for the
+    same event/market/selection. Raw snapshots and the source result remain
+    separately preserved by their own tables.
+    """
+
+    __tablename__ = "corridor_observations"
+    __table_args__ = (
+        CheckConstraint("odds > 1", name="odds_positive"),
+        CheckConstraint(
+            "implied_probability > 0 AND implied_probability < 1",
+            name="implied_probability_range",
+        ),
+        CheckConstraint("outcome IN ('win', 'loss', 'return')", name="outcome"),
+        Index(
+            "ux_corridor_observation_contract",
+            "event_match_id",
+            "market_id",
+            "selection",
+            text("COALESCE(line, -999999)"),
+            unique=True,
+        ),
+        Index("ix_corridor_observations_event_match_id", "event_match_id"),
+        Index("ix_corridor_observations_result_id", "result_id"),
+        Index("ix_corridor_observations_snapshot_id", "odds_snapshot_id"),
+        Index("ix_corridor_observations_available_at", "result_available_at"),
+        Index(
+            "ix_corridor_observations_active_lookup",
+            "is_active",
+            "bookmaker_source_id",
+            "sport",
+            "game_key",
+            "market_code",
+            "selection",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(BIGINT_ID, primary_key=True, autoincrement=True)
+    event_match_id: Mapped[int] = mapped_column(ForeignKey("event_matches.id"), nullable=False)
+    odds_snapshot_id: Mapped[int] = mapped_column(
+        ForeignKey("odds_snapshots.id"), nullable=False
+    )
+    market_id: Mapped[int] = mapped_column(ForeignKey("markets.id"), nullable=False)
+    result_id: Mapped[int] = mapped_column(ForeignKey("results.id"), nullable=False)
+    bookmaker_source_id: Mapped[int] = mapped_column(ForeignKey("sources.id"), nullable=False)
+    sport: Mapped[str] = mapped_column(String(64), nullable=False)
+    game_key: Mapped[str] = mapped_column(String(64), nullable=False, server_default="")
+    tournament_family: Mapped[str] = mapped_column(
+        String(64), nullable=False, server_default=""
+    )
+    market_code: Mapped[str] = mapped_column(String(64), nullable=False)
+    selection: Mapped[str] = mapped_column(String(64), nullable=False)
+    line: Mapped[Decimal | None] = mapped_column(Numeric(10, 3))
+    odds: Mapped[Decimal] = mapped_column(Numeric(12, 5), nullable=False)
+    implied_probability: Mapped[Decimal] = mapped_column(Numeric(12, 10), nullable=False)
+    outcome: Mapped[str] = mapped_column(String(16), nullable=False)
+    mapping_reversed_sides: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default="false"
+    )
+    result_available_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
+    invalidated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class OddsCorridor(Base):
+    """Persisted aggregate over active, settled CorridorObservation rows."""
+
+    __tablename__ = "odds_corridors"
+    __table_args__ = (
+        CheckConstraint("scope_type IN ('global', 'tournament_family')", name="scope_type"),
+        CheckConstraint("odds_min > 1 AND odds_max > odds_min", name="odds_corridor_bounds"),
+        CheckConstraint("sample_size > 0", name="odds_corridor_sample_size"),
+        Index(
+            "ux_odds_corridor_bucket",
+            "bookmaker_source_id",
+            "sport",
+            "game_key",
+            "scope_type",
+            "scope_value",
+            "market_code",
+            "selection",
+            text("COALESCE(line, -999999)"),
+            "odds_min",
+            "odds_max",
+            unique=True,
+        ),
+        Index(
+            "ix_odds_corridor_lookup",
+            "bookmaker_source_id",
+            "sport",
+            "game_key",
+            "market_code",
+            "selection",
+            "line",
+            "odds_min",
+            "odds_max",
+        ),
+        Index("ix_odds_corridors_as_of", "as_of"),
+        Index(
+            "ix_odds_corridor_active_lookup",
+            "is_active",
+            "bookmaker_source_id",
+            "sport",
+            "game_key",
+            "market_code",
+            "selection",
+            "line",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(BIGINT_ID, primary_key=True, autoincrement=True)
+    bookmaker_source_id: Mapped[int] = mapped_column(ForeignKey("sources.id"), nullable=False)
+    sport: Mapped[str] = mapped_column(String(64), nullable=False)
+    game_key: Mapped[str] = mapped_column(String(64), nullable=False, server_default="")
+    scope_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    scope_value: Mapped[str] = mapped_column(String(255), nullable=False, server_default="")
+    market_code: Mapped[str] = mapped_column(String(64), nullable=False)
+    selection: Mapped[str] = mapped_column(String(64), nullable=False)
+    line: Mapped[Decimal | None] = mapped_column(Numeric(10, 3))
+    odds_min: Mapped[Decimal] = mapped_column(Numeric(12, 5), nullable=False)
+    odds_max: Mapped[Decimal] = mapped_column(Numeric(12, 5), nullable=False)
+    bucket_width: Mapped[Decimal] = mapped_column(Numeric(12, 5), nullable=False)
+    sample_size: Mapped[int] = mapped_column(Integer, nullable=False)
+    wins: Mapped[int] = mapped_column(Integer, nullable=False)
+    losses: Mapped[int] = mapped_column(Integer, nullable=False)
+    returns: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    win_rate: Mapped[Decimal] = mapped_column(Numeric(12, 10), nullable=False)
+    average_odds: Mapped[Decimal] = mapped_column(Numeric(12, 5), nullable=False)
+    average_implied_probability: Mapped[Decimal] = mapped_column(Numeric(12, 10), nullable=False)
+    roi_percent: Mapped[Decimal] = mapped_column(Numeric(12, 5), nullable=False)
+    edge_percent: Mapped[Decimal] = mapped_column(Numeric(12, 5), nullable=False)
+    confidence: Mapped[Decimal] = mapped_column(Numeric(5, 4), nullable=False)
+    as_of: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
+    retired_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

@@ -518,13 +518,14 @@ class ESBHistoryRepository:
                 winner = "P2"
             else:
                 winner = "X"
+            observed_at = raw_by_tournament[history.external_id][1].received_at
             result_values: dict[str, Any] = {
                 "score1": match.score1,
                 "score2": match.score2,
                 "winner": winner,
                 "is_draw": match.score1 == match.score2,
                 "total": match.score1 + match.score2,
-                # Historical ESB payloads expose a score, but no settlement time.
+                # ESB does not expose an official settlement timestamp.
                 "settled_at": None,
                 "raw_payload_id": raw_by_tournament[history.external_id][1].id,
             }
@@ -533,14 +534,13 @@ class ESBHistoryRepository:
                 session.add(
                     Result(
                         event_id=event.id,
-                        observed_at=raw_by_tournament[history.external_id][1].received_at,
+                        observed_at=observed_at,
                         **result_values,
                     )
                 )
             else:
                 for key, value in result_values.items():
                     setattr(result, key, value)
-                observed_at = raw_by_tournament[history.external_id][1].received_at
                 if result.observed_at is None or _aware_utc(observed_at) < _aware_utc(
                     result.observed_at
                 ):
@@ -778,12 +778,14 @@ class UELHistoryRepository:
             else:
                 winner = "X"
             raw_payload = raw_by_tournament[history.external_id]
+            observed_at = raw_payload.received_at
             result_values: dict[str, Any] = {
                 "score1": match.score1,
                 "score2": match.score2,
                 "winner": winner,
                 "is_draw": match.score1 == match.score2,
                 "total": match.score1 + match.score2,
+                # UEL exposes a row update time, not an official settlement time.
                 "settled_at": None,
                 "source_updated_at": match.source_updated_at,
                 "raw_payload_id": raw_payload.id,
@@ -793,7 +795,7 @@ class UELHistoryRepository:
                 session.add(
                     Result(
                         event_id=event.id,
-                        observed_at=raw_payload.received_at,
+                        observed_at=observed_at,
                         **result_values,
                     )
                 )
@@ -801,10 +803,10 @@ class UELHistoryRepository:
                 for key, value in result_values.items():
                     setattr(result, key, value)
                 first_observation = result.observed_at
-                if first_observation is None or _aware_utc(
-                    raw_payload.received_at
-                ) < _aware_utc(first_observation):
-                    result.observed_at = raw_payload.received_at
+                if first_observation is None or _aware_utc(observed_at) < _aware_utc(
+                    first_observation
+                ):
+                    result.observed_at = observed_at
             results_upserted += 1
 
         rejection_reasons = [
@@ -1005,12 +1007,14 @@ class SISH2HHistoryRepository:
                 winner = "P2"
             else:
                 winner = "X"
+            observed_at = payload.received_at
             result_values: dict[str, Any] = {
                 "score1": match.score1,
                 "score2": match.score2,
                 "winner": winner,
                 "is_draw": match.score1 == match.score2,
                 "total": match.score1 + match.score2,
+                # SIS exposes no official settlement timestamp.
                 "settled_at": None,
                 "raw_payload_id": raw_payload.id,
             }
@@ -1019,17 +1023,17 @@ class SISH2HHistoryRepository:
                 session.add(
                     Result(
                         event_id=event.id,
-                        observed_at=payload.received_at,
+                        observed_at=observed_at,
                         **result_values,
                     )
                 )
             else:
                 for key, value in result_values.items():
                     setattr(result, key, value)
-                if result.observed_at is None or _aware_utc(payload.received_at) < _aware_utc(
+                if result.observed_at is None or _aware_utc(observed_at) < _aware_utc(
                     result.observed_at
                 ):
-                    result.observed_at = payload.received_at
+                    result.observed_at = observed_at
             results_upserted += 1
 
         session.add(

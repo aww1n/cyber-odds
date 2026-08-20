@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
+from decimal import Decimal
 from typing import Literal
 
 from app.backtest.settlement import SettledBet, settle_bet, settle_market
@@ -25,8 +26,8 @@ class BacktestOpportunity:
     feature_cutoff_at: datetime
     odds_received_at: datetime
     odds_snapshot_id: int
-    probability: float
-    odds: float
+    probability: Decimal | float
+    odds: Decimal | float
     market: str
     selection: str
     tournament: str
@@ -35,6 +36,7 @@ class BacktestOpportunity:
     match_confidence: float
     score1: int | None
     score2: int | None
+    line: Decimal | float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,19 +55,19 @@ class SimulatedPrediction:
     odds_snapshot_id: int
     decision_at: datetime
     metrics: ValueMetrics
-    minimum_odds: float
+    minimum_odds: Decimal
     decision: Literal["alert", "skip"]
     filter_reasons: tuple[str, ...]
     anomaly_flags: tuple[str, ...]
-    bet_multiplier: float | None
-    suggested_stake: float | None
+    bet_multiplier: Decimal | None
+    suggested_stake: Decimal | None
     settlement: SettledBet | None
 
 
 @dataclass(frozen=True, slots=True)
 class BacktestRun:
     predictions: tuple[SimulatedPrediction, ...]
-    final_bankroll: float
+    final_bankroll: Decimal
 
     @property
     def bets(self) -> tuple[SimulatedPrediction, ...]:
@@ -78,15 +80,17 @@ class BacktestEngine:
         opportunities: list[BacktestOpportunity],
         config: BacktestConfig,
     ) -> BacktestRun:
-        bankroll = config.initial_bankroll
+        bankroll = Decimal(str(config.initial_bankroll))
         predictions: list[SimulatedPrediction] = []
         ordered = sorted(opportunities, key=lambda item: (item.decision_at, item.event_id))
         for item in ordered:
             self._validate_timestamps(item)
             metrics = calculate_value(item.probability, item.odds)
-            minimum_odds = metrics.fair_odds * config.safety_multiplier
+            minimum_odds = metrics.fair_odds * Decimal(
+                str(config.safety_multiplier)
+            )
             reasons, anomalies = self._filter(item, metrics, config.filters)
-            if item.odds < minimum_odds:
+            if Decimal(str(item.odds)) < minimum_odds:
                 reasons.append("below_minimum_odds")
             decision: Literal["alert", "skip"] = "skip" if reasons else "alert"
             settlement = None
@@ -104,6 +108,8 @@ class BacktestEngine:
                             item.selection,
                             score1=item.score1,
                             score2=item.score2,
+                            market=item.market,
+                            line=item.line,
                         )
                         settlement = settle_bet(outcome, stake=stake, odds=item.odds)
                         bankroll += settlement.profit
@@ -141,14 +147,22 @@ class BacktestEngine:
     ) -> tuple[list[str], list[str]]:
         reasons: list[str] = []
         anomalies: list[str] = []
+        odds = Decimal(str(item.odds))
+        probability = Decimal(str(item.probability))
         if item.sample_size < filters.min_samples:
             reasons.append("insufficient_sample")
         if item.h2h_samples < filters.min_h2h:
             reasons.append("insufficient_h2h")
-        if not filters.min_odds <= item.odds <= filters.max_odds:
+        if not Decimal(str(filters.min_odds)) <= odds <= Decimal(str(filters.max_odds)):
             reasons.append("odds_out_of_range")
-        if not filters.min_probability <= item.probability <= filters.max_probability:
+        if not (
+            Decimal(str(filters.min_probability))
+            <= probability
+            <= Decimal(str(filters.max_probability))
+        ):
             reasons.append("probability_out_of_range")
+        if metrics.value_percent < Decimal(str(filters.min_value_percent)):
+            reasons.append("below_minimum_value")
         if filters.allowed_markets and item.market not in filters.allowed_markets:
             reasons.append("market_not_allowed")
         if filters.allowed_tournaments and item.tournament not in filters.allowed_tournaments:
@@ -159,7 +173,9 @@ class BacktestEngine:
         if item.decision_at - item.odds_received_at > filters.stale_after:
             reasons.append("stale_odds")
             anomalies.append("stale_odds")
-        if metrics.value_percent > filters.suspicious_edge_percent:
+        if metrics.value_percent > Decimal(
+            str(filters.suspicious_edge_percent)
+        ):
             reasons.append("suspiciously_high_edge")
             anomalies.append("suspiciously_high_edge")
         return reasons, anomalies
@@ -168,15 +184,16 @@ class BacktestEngine:
     def _stake(
         item: BacktestOpportunity,
         metrics: ValueMetrics,
-        bankroll: float,
+        bankroll: Decimal,
         config: BacktestConfig,
-    ) -> tuple[float, float]:
+    ) -> tuple[Decimal, Decimal]:
         if config.stake_mode == "fixed":
-            return fixed_stake(config.base_stake), 1.0
+            return fixed_stake(config.base_stake), Decimal("1")
         if config.stake_mode == "observed_ml":
-            multiplier = observed_ml_bet_multiplier(metrics.value_ratio)
-            return observed_ml_stake(config.base_stake, metrics.value_ratio), multiplier
-        fraction = 0.1 if config.stake_mode == "kelly_0_1" else 0.25
+            value_ratio = metrics.value_ratio
+            multiplier = observed_ml_bet_multiplier(value_ratio)
+            return observed_ml_stake(config.base_stake, value_ratio), multiplier
+        fraction = Decimal("0.1") if config.stake_mode == "kelly_0_1" else Decimal("0.25")
         stake = fractional_kelly_stake(
             bankroll,
             probability=item.probability,
@@ -184,4 +201,4 @@ class BacktestEngine:
             fraction=fraction,
             max_stake=config.max_stake,
         )
-        return stake, stake / config.base_stake
+        return stake, stake / Decimal(str(config.base_stake))

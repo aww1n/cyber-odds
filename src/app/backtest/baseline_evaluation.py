@@ -1,18 +1,34 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
-from datetime import UTC, datetime
+from collections import defaultdict
+from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from typing import Literal, cast
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
+from app.backtest.settlement import normalize_market_selection, settle_market
 from app.backtest.walk_forward import WalkForwardSplit
-from app.database.models import Event, Result, Source
+from app.database.models import (
+    Event,
+    EventMatch,
+    Market,
+    OddsSnapshot,
+    Result,
+    Source,
+)
 from app.features import RESEARCH_WINDOWS, DatabaseFeatureBuilder, FeatureSet
 from app.models.baseline import OutcomeProbabilities, blend_h2h_and_individual
-from app.models.statistical import poisson_outcomes
+from app.models.statistical import (
+    TotalProbabilities,
+    TotalSelection,
+    poisson_outcomes,
+    poisson_total_probabilities,
+)
 
 Outcome = Literal["P1", "X", "P2"]
 
@@ -62,6 +78,63 @@ class BaselineEvaluationReport:
     folds: tuple[FoldEvaluation, ...]
     out_of_sample: dict[str, ProbabilityMetrics]
     note: str
+    market_backtest: dict[str, MarketBacktestMetrics] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class MarketBacktestMetrics:
+    bets: int
+    wins: int
+    losses: int
+    returns: int
+    hit_rate_percent: Decimal
+    total_stake: Decimal
+    profit: Decimal
+    roi_percent: Decimal
+    yield_percent: Decimal
+
+
+@dataclass(slots=True)
+class _MarketAggregate:
+    bets: int = 0
+    wins: int = 0
+    losses: int = 0
+    returns: int = 0
+    profit: Decimal = Decimal("0")
+
+    def add(self, *, outcome: str, odds: Decimal) -> None:
+        self.bets += 1
+        if outcome == "win":
+            self.wins += 1
+            self.profit += odds - Decimal("1")
+        elif outcome == "loss":
+            self.losses += 1
+            self.profit -= Decimal("1")
+        elif outcome == "return":
+            self.returns += 1
+        else:
+            raise ValueError(f"Unsupported backtest outcome: {outcome}")
+
+    def metrics(self) -> MarketBacktestMetrics:
+        stake = Decimal(self.bets)
+        decisive = self.wins + self.losses
+        hit_rate = (
+            Decimal("100") * Decimal(self.wins) / Decimal(decisive)
+            if decisive
+            else Decimal("0")
+        )
+        roi = self.profit / stake * 100 if stake else Decimal("0")
+        return MarketBacktestMetrics(
+            bets=self.bets,
+            wins=self.wins,
+            losses=self.losses,
+            returns=self.returns,
+            hit_rate_percent=hit_rate,
+            total_stake=stake,
+            profit=self.profit,
+            roi_percent=roi,
+            yield_percent=roi,
+        )
 
 
 def _feature(features: FeatureSet, key: str) -> float:
@@ -167,6 +240,38 @@ def predict_baselines(features: FeatureSet) -> dict[str, OutcomeProbabilities]:
             f"h2h_{label}",
         )
     return predictions
+
+
+def predict_total_probability(
+    features: FeatureSet,
+    *,
+    line: float,
+    selection: TotalSelection,
+) -> TotalProbabilities:
+    """Predict a total from historical score totals, independently of 1X2.
+
+    The individual-player expectation is blended with H2H only as H2H sample
+    depth grows.  All input aggregates are produced by ``FeatureBuilder`` using
+    rows available strictly before the prediction cutoff.
+    """
+
+    player_total = (
+        _feature(features, "p1_global_all_total_avg")
+        + _feature(features, "p2_global_all_total_avg")
+    ) / 2
+    h2h_samples = _feature(features, "h2h_all_matches")
+    h2h_total = _feature(features, "h2h_all_total_avg")
+    h2h_weight = h2h_samples / (h2h_samples + 20.0) if h2h_samples > 0 else 0.0
+    expected_total = (1.0 - h2h_weight) * player_total + h2h_weight * h2h_total
+    # A zero rate would create an invalid persisted probability for OVER.  It
+    # can occur only without useful history and is still rejected by min_samples.
+    expected_total = max(expected_total, 1e-9)
+    return poisson_total_probabilities(
+        goals1_rate=expected_total,
+        goals2_rate=0.0,
+        line=line,
+        selection=selection,
+    )
 
 
 def calculate_probability_metrics(
@@ -338,6 +443,11 @@ class DatabaseBaselineEvaluator:
                     )
                 )
         folds, out_of_sample = evaluate_walk_forward(predictions, splits)
+        market_backtest = await self._market_backtest(
+            session,
+            source_code=source_code,
+            min_player_samples=min_player_samples,
+        )
         return BaselineEvaluationReport(
             source=source_code,
             candidates_seen=len(rows),
@@ -346,10 +456,139 @@ class DatabaseBaselineEvaluator:
             folds=folds,
             out_of_sample=out_of_sample,
             note=(
-                "Probability-only evaluation. Betting ROI is intentionally omitted until "
-                "a historical odds corpus is available before the evaluated decisions."
+                "Probability metrics use walk-forward test intervals. Market ROI uses only "
+                "matched, latest valid pre-match Fonbet snapshots and is empty when that "
+                "historical corpus is unavailable."
             ),
+            market_backtest=market_backtest,
         )
+
+    async def _market_backtest(
+        self,
+        session: AsyncSession,
+        *,
+        source_code: str,
+        min_player_samples: int,
+    ) -> dict[str, MarketBacktestMetrics]:
+        source_event = aliased(Event)
+        bookmaker_event = aliased(Event)
+        snapshot_rank = func.row_number().over(
+            partition_by=(
+                EventMatch.id,
+                Market.code,
+                OddsSnapshot.selection,
+                OddsSnapshot.line,
+            ),
+            order_by=(OddsSnapshot.received_at.desc(), OddsSnapshot.id.desc()),
+        ).label("snapshot_rank")
+        ranked = (
+            select(
+                EventMatch.id.label("event_match_id"),
+                EventMatch.source_event_id,
+                EventMatch.confidence,
+                EventMatch.components,
+                bookmaker_event.started_at.label("bookmaker_started_at"),
+                OddsSnapshot.id.label("odds_snapshot_id"),
+                OddsSnapshot.received_at,
+                OddsSnapshot.selection,
+                OddsSnapshot.line,
+                OddsSnapshot.odds,
+                Market.code.label("market_code"),
+                Result.score1,
+                Result.score2,
+                snapshot_rank,
+            )
+            .select_from(EventMatch)
+            .join(source_event, source_event.id == EventMatch.source_event_id)
+            .join(Source, Source.id == source_event.source_id)
+            .join(Result, Result.event_id == source_event.id)
+            .join(bookmaker_event, bookmaker_event.id == EventMatch.bookmaker_event_id)
+            .join(OddsSnapshot, OddsSnapshot.event_id == bookmaker_event.id)
+            .join(Market, Market.id == OddsSnapshot.market_id)
+            .where(
+                Source.code == source_code,
+                EventMatch.status == "matched",
+                Market.code.in_(("1x2", "total")),
+                OddsSnapshot.received_at < bookmaker_event.started_at,
+                OddsSnapshot.received_at
+                >= bookmaker_event.started_at - timedelta(minutes=15),
+            )
+            .subquery()
+        )
+        rows = (
+            await session.execute(select(ranked).where(ranked.c.snapshot_rank == 1))
+        ).mappings().all()
+        aggregates: dict[str, _MarketAggregate] = defaultdict(_MarketAggregate)
+        for row in rows:
+            market = str(row["market_code"])
+            line = None if row["line"] is None else Decimal(str(row["line"]))
+            try:
+                selection = normalize_market_selection(
+                    str(row["selection"]),
+                    market=market,
+                    line=line,
+                )
+            except ValueError:
+                continue
+            if market == "1x2" and selection not in {"P1", "X", "P2"}:
+                continue
+            if market == "total" and (selection not in {"over", "under"} or line is None):
+                continue
+            cutoff = self._aware(row["received_at"])
+            features = await self._feature_builder.build(
+                session,
+                event_id=int(row["source_event_id"]),
+                cutoff_at=cutoff,
+            )
+            sample_size = min(
+                round(_feature(features, "p1_global_all_matches")),
+                round(_feature(features, "p2_global_all_matches")),
+            )
+            if sample_size < min_player_samples:
+                continue
+            reversed_sides = bool((row["components"] or {}).get("reversed_sides"))
+            if market == "1x2":
+                outcome_probabilities = predict_baselines(features)["individual_h2h_fixed"]
+                probabilities_by_selection = {
+                    "P1": outcome_probabilities.p1,
+                    "X": outcome_probabilities.draw,
+                    "P2": outcome_probabilities.p2,
+                }
+                if reversed_sides:
+                    probabilities_by_selection = {
+                        "P1": probabilities_by_selection["P2"],
+                        "X": probabilities_by_selection["X"],
+                        "P2": probabilities_by_selection["P1"],
+                    }
+                model_probability = probabilities_by_selection[selection]
+            else:
+                assert line is not None
+                model_probability = predict_total_probability(
+                    features,
+                    line=float(line),
+                    selection=cast(TotalSelection, selection),
+                ).conditional_win
+            odds = Decimal(str(row["odds"]))
+            model_probability = max(model_probability, 1e-12)
+            fair_odds = Decimal("1") / Decimal(str(model_probability))
+            if odds <= fair_odds:
+                continue
+            score1, score2 = int(row["score1"]), int(row["score2"])
+            if reversed_sides:
+                score1, score2 = score2, score1
+            outcome = settle_market(
+                selection,
+                score1=score1,
+                score2=score2,
+                market=market,
+                line=line,
+            )
+            keys = [market if market == "1x2" else f"total_{selection}"]
+            if market == "total" and line is not None:
+                keys.append(f"total_{selection}_{format(line.normalize(), 'f')}")
+            for key in keys:
+                aggregates[key].add(outcome=outcome, odds=odds)
+        return {key: value.metrics() for key, value in sorted(aggregates.items())}
 
     @staticmethod
     def _aware(value: datetime) -> datetime:

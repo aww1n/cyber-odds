@@ -114,6 +114,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Match only upcoming scheduled bookmaker events against source schedule/history",
     )
+    match_events.add_argument(
+        "--completed",
+        action="store_true",
+        help="Reconcile completed source results with saved pre-match bookmaker odds",
+    )
 
     backtest = subparsers.add_parser(
         "backtest",
@@ -158,6 +163,22 @@ def build_parser() -> argparse.ArgumentParser:
         help="Persist baseline predictions and alert/skip decisions for matched events",
     )
     subparsers.add_parser("health", help="Check PostgreSQL and Redis dependencies")
+    subparsers.add_parser("db-audit", help="Run read-only database integrity checks")
+    build_corridors = subparsers.add_parser(
+        "build-corridors",
+        help="Materialize observations and rebuild odds corridors once",
+    )
+    build_corridors.add_argument("--bookmaker", default="fonbet")
+    subparsers.add_parser(
+        "corridor-progress",
+        help="Show materialized corridor coverage",
+    )
+    corridor_stats = subparsers.add_parser(
+        "corridor-stats",
+        help="Show best active corridor buckets",
+    )
+    corridor_stats.add_argument("--bookmaker", default="fonbet")
+    corridor_stats.add_argument("--limit", type=int, default=20)
     return parser
 
 
@@ -467,6 +488,7 @@ async def match_events(
     historical_source_code: str,
     bookmaker_source_code: str,
     live_only: bool = False,
+    completed_only: bool = False,
 ) -> dict[str, object]:
     engine = build_async_engine(settings.database_url)
     try:
@@ -477,8 +499,121 @@ async def match_events(
                 historical_source_code=historical_source_code,
                 bookmaker_source_code=bookmaker_source_code,
                 live_only=live_only,
+                completed_only=completed_only,
             )
         return asdict(stats)
+    finally:
+        await engine.dispose()
+
+
+async def db_audit(settings: Settings) -> dict[str, object]:
+    from app.database.audit import audit_database
+
+    engine = build_async_engine(settings.database_url)
+    try:
+        sessions = build_session_factory(engine)
+        async with sessions() as session:
+            report = await audit_database(session)
+        return {
+            "healthy": report.healthy,
+            "counts": report.counts,
+            "problems": report.problems,
+        }
+    finally:
+        await engine.dispose()
+
+
+async def build_corridors_once(
+    settings: Settings,
+    *,
+    bookmaker_code: str = "fonbet",
+) -> dict[str, object]:
+    from app.corridors.repository import CorridorRepository
+
+    engine = build_async_engine(settings.database_url)
+    try:
+        sessions = build_session_factory(engine)
+        async with sessions.begin() as session:
+            report = await CorridorRepository().rebuild(
+                session,
+                bookmaker_code=bookmaker_code,
+                bucket_width=settings.corridor_bucket_width,
+                min_samples=settings.corridor_min_samples,
+                max_odds_age=timedelta(
+                    minutes=settings.corridor_max_odds_age_minutes
+                ),
+            )
+        return asdict(report)
+    finally:
+        await engine.dispose()
+
+
+async def corridor_progress(settings: Settings) -> dict[str, int]:
+    from app.database.models import CorridorObservation, OddsCorridor
+
+    engine = build_async_engine(settings.database_url)
+    try:
+        sessions = build_session_factory(engine)
+        async with sessions() as session:
+            return {
+                "observations": int(
+                    await session.scalar(
+                        select(func.count(CorridorObservation.id)).where(
+                            CorridorObservation.is_active.is_(True)
+                        )
+                    )
+                    or 0
+                ),
+                "active_buckets": int(
+                    await session.scalar(
+                        select(func.count(OddsCorridor.id)).where(
+                            OddsCorridor.is_active.is_(True)
+                        )
+                    )
+                    or 0
+                ),
+            }
+    finally:
+        await engine.dispose()
+
+
+async def corridor_stats(
+    settings: Settings,
+    *,
+    bookmaker_code: str,
+    limit: int,
+) -> list[dict[str, object]]:
+    from app.corridors.repository import CorridorRepository
+
+    engine = build_async_engine(settings.database_url)
+    try:
+        sessions = build_session_factory(engine)
+        async with sessions() as session:
+            rows = await CorridorRepository().top_corridors(
+                session,
+                bookmaker_code=bookmaker_code,
+                min_samples=settings.corridor_min_samples,
+                limit=limit,
+            )
+        return [
+            {
+                "scope": item.scope_type,
+                "scope_value": item.scope_value,
+                "market": item.market_code,
+                "selection": item.selection,
+                "line": str(item.line) if item.line is not None else None,
+                "odds_min": str(item.odds_min),
+                "odds_max": str(item.odds_max),
+                "sample_size": item.sample_size,
+                "wins": item.wins,
+                "losses": item.losses,
+                "returns": item.returns,
+                "roi_percent": str(item.roi_percent),
+                "yield_percent": str(item.roi_percent),
+                "confidence": str(item.confidence),
+            }
+            for item in rows
+        ]
     finally:
         await engine.dispose()
 
@@ -565,6 +700,10 @@ def _write_baseline_report(
                 "out_of_sample": {
                     name: asdict(metrics)
                     for name, metrics in report.out_of_sample.items()
+                },
+                "market_backtest": {
+                    name: asdict(metrics)
+                    for name, metrics in report.market_backtest.items()
                 },
                 "note": report.note,
                 "output": str(output),
@@ -823,6 +962,17 @@ async def run_recurring_services(settings: Settings, *, role: str) -> None:
         LOGGER.info("Matching cycle: %s", matching)
         LOGGER.info("Prediction cycle: %s", prediction)
 
+    async def corridor_job() -> None:
+        reconciliation = await match_events(
+            settings,
+            historical_source_code="uel_ef",
+            bookmaker_source_code="fonbet",
+            completed_only=True,
+        )
+        corridors = await build_corridors_once(settings)
+        LOGGER.info("Historical reconciliation cycle: %s", reconciliation)
+        LOGGER.info("Corridor rebuild cycle: %s", corridors)
+
     if role in {"odds", "all"} and settings.fonbet_enabled:
         if settings.fonbet_base_url is None:
             raise RuntimeError("FONBET_BASE_URL is required for the odds worker")
@@ -847,6 +997,13 @@ async def run_recurring_services(settings: Settings, *, role: str) -> None:
                     "uel-predictions",
                     settings.odds_collection_interval_seconds,
                     prediction_job,
+                )
+            )
+            jobs.append(
+                RecurringJob(
+                    "odds-corridors",
+                    settings.corridor_rebuild_interval_seconds,
+                    corridor_job,
                 )
             )
         if settings.sis_h2h_enabled:
@@ -945,6 +1102,8 @@ def main() -> None:
             )
         )
     elif args.command == "match-events":
+        if args.live and args.completed:
+            raise SystemExit("--live and --completed are mutually exclusive")
         print(
             json.dumps(
                 asyncio.run(
@@ -953,6 +1112,7 @@ def main() -> None:
                         historical_source_code=args.historical_source,
                         bookmaker_source_code=args.bookmaker_source,
                         live_only=args.live,
+                        completed_only=args.completed,
                     )
                 ),
                 ensure_ascii=False,
@@ -999,6 +1159,44 @@ def main() -> None:
         print(json.dumps(health, indent=2))
         if not all(health.values()):
             raise SystemExit(1)
+    elif args.command == "db-audit":
+        audit_report = asyncio.run(db_audit(settings))
+        print(json.dumps(audit_report, ensure_ascii=False, indent=2))
+        if not audit_report["healthy"]:
+            raise SystemExit(1)
+    elif args.command == "build-corridors":
+        print(
+            json.dumps(
+                asyncio.run(
+                    build_corridors_once(settings, bookmaker_code=args.bookmaker)
+                ),
+                ensure_ascii=False,
+                indent=2,
+                default=str,
+            )
+        )
+    elif args.command == "corridor-progress":
+        print(
+            json.dumps(
+                asyncio.run(corridor_progress(settings)),
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+    elif args.command == "corridor-stats":
+        print(
+            json.dumps(
+                asyncio.run(
+                    corridor_stats(
+                        settings,
+                        bookmaker_code=args.bookmaker,
+                        limit=args.limit,
+                    )
+                ),
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
 
 
 if __name__ == "__main__":

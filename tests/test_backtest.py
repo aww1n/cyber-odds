@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 
 import pytest
 
@@ -59,6 +60,8 @@ def test_backtest_saves_alerts_and_skips_and_settles_only_bets() -> None:
     assert metrics.wins == 1
     assert metrics.profit == 10
     assert metrics.roi_percent == 100
+    assert metrics.yield_percent == 100
+    assert metrics.hit_rate_percent == 100
 
 
 def test_suspicious_edge_is_blocked_and_flagged() -> None:
@@ -70,6 +73,16 @@ def test_suspicious_edge_is_blocked_and_flagged() -> None:
     prediction = run.predictions[0]
     assert prediction.decision == "skip"
     assert "suspiciously_high_edge" in prediction.anomaly_flags
+
+
+def test_minimum_value_filter_uses_unrounded_decimal_value() -> None:
+    run = BacktestEngine().run(
+        [_opportunity(1, probability=0.50001, odds=2.0)],
+        BacktestConfig(filters=SignalFilters(min_value_percent=Decimal("0.003"))),
+    )
+
+    assert run.predictions[0].decision == "skip"
+    assert "below_minimum_value" in run.predictions[0].filter_reasons
 
 
 def test_backtest_rejects_future_odds_snapshot() -> None:

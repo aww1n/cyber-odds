@@ -1,45 +1,52 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from math import isfinite
+from decimal import Decimal, InvalidOperation
+
+Numeric = Decimal | float | int
 
 
 @dataclass(frozen=True, slots=True)
 class ValueMetrics:
     """Metrics derived from one model probability and one immutable odds snapshot."""
 
-    probability: float
-    odds: float
-    fair_odds: float
-    value_ratio: float
-    value_percent: float
+    probability: Decimal
+    odds: Decimal
+    fair_odds: Decimal
+    value_ratio: Decimal
+    value_percent: Decimal
 
 
-def _require_finite_positive(value: float, name: str) -> None:
-    if not isfinite(value) or value <= 0:
+def _decimal(value: Numeric, name: str) -> Decimal:
+    try:
+        result = value if isinstance(value, Decimal) else Decimal(str(value))
+    except (InvalidOperation, ValueError) as error:
+        raise ValueError(f"{name} must be finite and greater than zero") from error
+    if not result.is_finite() or result <= 0:
         raise ValueError(f"{name} must be finite and greater than zero")
+    return result
 
 
-def fair_odds(probability: float) -> float:
+def fair_odds(probability: Numeric) -> Decimal:
     """Return decimal fair odds for a probability in the interval (0, 1]."""
 
-    _require_finite_positive(probability, "probability")
-    if probability > 1:
+    decimal_probability = _decimal(probability, "probability")
+    if decimal_probability > 1:
         raise ValueError("probability must not exceed one")
-    return 1.0 / probability
+    return Decimal("1") / decimal_probability
 
 
-def calculate_value(probability: float, odds: float) -> ValueMetrics:
+def calculate_value(probability: Numeric, odds: Numeric) -> ValueMetrics:
     """Calculate fair odds, value ratio ``v`` and displayed value percent."""
 
-    _require_finite_positive(odds, "odds")
-    fair = fair_odds(probability)
-    ratio = odds * probability
+    decimal_probability = _decimal(probability, "probability")
+    decimal_odds = _decimal(odds, "odds")
+    fair = fair_odds(decimal_probability)
+    ratio = decimal_odds * decimal_probability
     return ValueMetrics(
-        probability=probability,
-        odds=odds,
+        probability=decimal_probability,
+        odds=decimal_odds,
         fair_odds=fair,
         value_ratio=ratio,
-        value_percent=(ratio - 1.0) * 100.0,
+        value_percent=(ratio - Decimal("1")) * Decimal("100"),
     )
-

@@ -20,6 +20,12 @@ def test_live_uel_strategy_is_enabled_with_current_sample_threshold() -> None:
     assert strategy.safety_multiplier == 1.15
     assert strategy.allowed_markets == ("1x2",)
     assert strategy.backtest_config().filters.min_samples == 12
+    assert strategy.backtest_config().filters.min_value_percent == 0
+    totals = configured.strategies["uel_football_totals"]
+    assert totals.prediction_enabled
+    assert totals.alerts_enabled
+    assert totals.model_name == "poisson_goals"
+    assert totals.allowed_markets == ("total",)
     assert not configured.strategies["fon_ml_v1"].prediction_enabled
 
 

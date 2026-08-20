@@ -30,6 +30,14 @@ class SignalAlertView:
     sample_size: int | None
     model: str
     external_id: str
+    bankroll_at_signal: Decimal | None = None
+    stake_percent: Decimal | None = None
+    stake_amount: Decimal | None = None
+    game: str | None = None
+    team1: str | None = None
+    team2: str | None = None
+    corridor: dict[str, object] | None = None
+    signal_id: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,6 +53,8 @@ class SettlementView:
     payout: Decimal
     outcome: str
     profit: Decimal
+    market: str | None = None
+    line: Decimal | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,53 +102,149 @@ def _decimal(value: Decimal, digits: int = 2) -> str:
     return f"{value:.{digits}f}"
 
 
-def _selection_label(selection: str, participant1: str, participant2: str) -> str:
+def _selection_label(
+    selection: str,
+    participant1: str,
+    participant2: str,
+    line: Decimal | None = None,
+) -> str:
     labels = {
         "P1": f"П1 — {participant1}",
         "X": "Ничья",
         "P2": f"П2 — {participant2}",
     }
+    if selection.upper() in {"OVER", "UNDER"} and line is not None:
+        line_str = _decimal(line, 3).rstrip("0").rstrip(".")
+        if selection.upper() == "OVER":
+            return f"ТБ {line_str}"
+        return f"ТМ {line_str}"
     return labels.get(selection, selection)
+
+
+def _money(value: Decimal) -> str:
+    return f"{value:,.0f}".replace(",", " ")
 
 
 def format_signal_alert(
     view: SignalAlertView,
     *,
     timezone: str = "Europe/Moscow",
+    now: datetime | None = None,
 ) -> str:
-    local_time = _aware_utc(view.started_at).astimezone(ZoneInfo(timezone))
+    started_at = _aware_utc(view.started_at)
+    local_time = started_at.astimezone(ZoneInfo(timezone))
+    current = _aware_utc(now or datetime.now(UTC))
+    minutes_to_start = max(0, int((started_at - current).total_seconds() / 60))
+    time_display = (
+        f"⏱ До матча: {minutes_to_start} мин"
+        if minutes_to_start > 0
+        else "⏱ Начинается сейчас"
+    )
+
     icon = "🏒" if "hockey" in view.sport.casefold() else "⚽"
     sport_label = "Киберхоккей" if icon == "🏒" else "Киберфутбол"
     shown_odds = view.display_odds or view.calculation_odds
-    bet_label = _selection_label(view.selection, view.participant1, view.participant2)
-    line = ""
-    if view.line is not None:
-        line = f" • линия {_decimal(view.line, 3).rstrip('0').rstrip('.')}"
+    bet_label = _selection_label(
+        view.selection,
+        view.participant1,
+        view.participant2,
+        view.line,
+    )
+    market_display_map = {
+        "1x2": "Основной исход",
+        "total": "Тотал",
+        "handicap": "Гандикап",
+    }
+    market_display = market_display_map.get(view.market.lower(), view.market)
+
+    is_total = view.selection.lower() in {"over", "under"}
+    line_display = ""
+    if view.line is not None and not is_total:
+        line_display = f" • линия {_decimal(view.line, 3).rstrip('0').rstrip('.')}"
+
     format_suffix = f" • {escape(view.event_format)}" if view.event_format else ""
     sample = f"{view.sample_size} матчей" if view.sample_size is not None else "нет данных"
-    stake = (
-        f"\n💵 Ставка по стратегии: {_decimal(view.suggested_stake, 2)}"
-        if view.suggested_stake is not None
+
+    bankroll_display = ""
+    if (
+        view.bankroll_at_signal is not None
+        and view.stake_percent is not None
+        and view.stake_amount is not None
+    ):
+        bankroll_display = (
+            f"\n\n🏦 Банк: {_money(view.bankroll_at_signal)} ₽\n"
+            f"📌 Ставка: {_decimal(view.stake_percent, 1)}% банка\n"
+            f"💵 Сумма: {_money(view.stake_amount)} ₽"
+        )
+    elif view.suggested_stake is not None:
+        bankroll_display = f"\n💵 Ставка по стратегии: {_decimal(view.suggested_stake, 2)}"
+
+    corridor = view.corridor or {"status": "insufficient"}
+    if corridor.get("status") == "insufficient":
+        corridor_display = "\n\n📊 Коридор:\nНедостаточно исторических наблюдений"
+    else:
+        odds_min = Decimal(str(corridor["odds_min"]))
+        odds_max = Decimal(str(corridor["odds_max"]))
+        win_rate = Decimal(str(corridor["win_rate"])) * 100
+        roi = Decimal(str(corridor["roi_percent"]))
+        corridor_contract = f"{bet_label}\n" if is_total else ""
+        corridor_display = (
+            "\n\n📊 Коридор:\n"
+            f"{corridor_contract}"
+            f"Кэф {_decimal(odds_min)}–{_decimal(odds_max)}\n"
+            f"Выборка: {corridor['sample_size']}\n"
+            f"Winrate: {_decimal(win_rate, 1)}%\n"
+            f"ROI: {roi:+.1f}%"
+        )
+
+    path_nodes = [view.source_tag.upper()]
+    if view.game:
+        path_nodes.append(view.game)
+    elif view.sport:
+        path_nodes.append(sport_label)
+    if view.tournament:
+        path_nodes.append(view.tournament)
+    path_nodes.extend(
+        (
+            f"{view.participant1} — {view.participant2}",
+            market_display,
+            bet_label,
+        )
+    )
+    path = "\n\n📍 <b>ГДЕ СТАВИТЬ:</b>\n" + "\n→ ".join(
+        escape(node) for node in path_nodes
+    )
+    teams = (
+        f"\n🌍 {escape(view.team1)} — {escape(view.team2)}"
+        if view.team1 and view.team2
         else ""
     )
+    identity = f"Event: {escape(view.external_id)}"
+    if view.signal_id is not None:
+        identity += f" / Signal: {view.signal_id}"
+
     return (
         "🔥 <b>СИГНАЛ НА СТАВКУ</b>\n\n"
+        f"{time_display}\n"
+        f"🕐 Начало: {local_time:%d.%m.%Y %H:%M}\n\n"
         f"{icon} <b>{sport_label}</b>\n"
         f"🏆 {escape(view.tournament)}{format_suffix}\n"
-        f"🕒 {local_time:%d.%m.%Y %H:%M}\n\n"
-        f"👥 <b>{escape(view.participant1)}</b> — <b>{escape(view.participant2)}</b>\n\n"
+        f"👥 <b>{escape(view.participant1)}</b> — <b>{escape(view.participant2)}</b>"
+        f"{teams}\n\n"
         f"🎯 <b>Ставка: {escape(bet_label)}</b>\n"
         f"🏦 Букмекер: <b>{escape(view.source_tag.upper())}</b>\n"
-        f"📌 Рынок: {escape(view.market)}{line}\n"
+        f"📌 Рынок: {escape(market_display)}{line_display}\n"
         f"💰 <b>Коэффициент: {_decimal(shown_odds)}</b>\n\n"
         f"📊 Вероятность модели: {_decimal(view.probability * 100)}%\n"
         f"🎲 Fair odds: {_decimal(view.fair_odds)}\n"
         f"📈 Value: <b>{view.value_percent:+.1f}%</b>\n"
         f"🛡 Минимальный коэффициент: {_decimal(view.minimum_odds)}\n"
         f"📚 Выборка: {sample}"
-        f"{stake}\n\n"
+        f"{corridor_display}"
+        f"{bankroll_display}"
+        f"{path}\n\n"
         f"🤖 {escape(view.model)}\n"
-        f"🆔 {escape(view.external_id)}"
+        f"🆔 {identity}"
     )
 
 
@@ -151,7 +257,12 @@ def format_settlement(view: SettlementView) -> str:
         title = "↩️ <b>ВОЗВРАТ СТАВКИ</b>"
     else:
         title = "🚫 <b>СТАВКА АННУЛИРОВАНА</b>"
-    bet_label = _selection_label(view.selection, view.participant1, view.participant2)
+    bet_label = _selection_label(
+        view.selection,
+        view.participant1,
+        view.participant2,
+        view.line,
+    )
     return (
         f"{title}\n\n"
         f"👥 {escape(view.participant1)} — {escape(view.participant2)}\n"

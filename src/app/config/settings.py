@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from decimal import Decimal
 from functools import lru_cache
 from pathlib import Path
 
@@ -58,12 +59,28 @@ class Settings(BaseSettings):
     esb_backfill_participants: str = ""
     strategies_path: Path = Path("config/strategies.yaml")
 
+    bankroll: Decimal = Field(default=Decimal("100000"), gt=0)
+    default_stake_percent: Decimal = Field(default=Decimal("1.5"), gt=0, le=100)
+    min_stake_percent: Decimal = Field(default=Decimal("0.25"), gt=0, le=100)
+    max_stake_percent: Decimal = Field(default=Decimal("3.0"), gt=0, le=100)
+
+    alert_minutes_before_start: int = Field(default=10, gt=0, le=1440)
+
+    corridor_rebuild_interval_seconds: float = Field(default=300.0, gt=0, le=86400)
+    corridor_max_odds_age_minutes: int = Field(default=15, gt=0, le=1440)
+    corridor_bucket_width: Decimal = Field(default=Decimal("0.25"), gt=0)
+    corridor_min_samples: int = Field(default=20, gt=0)
+
     @model_validator(mode="after")
-    def validate_production_secrets(self) -> "Settings":
+    def validate_production_secrets(self) -> Settings:
         if self.app_env.casefold() == "production" and "change_me" in self.database_url:
             raise ValueError(
                 "production DATABASE_URL must not use the default change_me password"
             )
+        if self.min_stake_percent > self.default_stake_percent:
+            raise ValueError("MIN_STAKE_PERCENT cannot exceed DEFAULT_STAKE_PERCENT")
+        if self.default_stake_percent > self.max_stake_percent:
+            raise ValueError("DEFAULT_STAKE_PERCENT cannot exceed MAX_STAKE_PERCENT")
         return self
 
     @property

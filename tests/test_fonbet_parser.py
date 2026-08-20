@@ -32,6 +32,7 @@ def test_parser_selects_target_tournaments_and_root_events() -> None:
 
 
 def test_parser_maps_only_verified_core_factor_semantics() -> None:
+    """Test that parser uses normalized selection format for totals."""
     catalog = parse_fonbet_catalog(load_fixture())
 
     quote = next(
@@ -43,7 +44,8 @@ def test_parser_maps_only_verified_core_factor_semantics() -> None:
     assert quote.line == Decimal("2.5")
     assert quote.market_code == "total"
     assert quote.market_name == "Full time total"
-    assert quote.selection == "TB(2.5)"
+    # Modern normalized format: selection="over" with separate line field
+    assert quote.selection == "over"
     assert {quote.factor_id for quote in catalog.quotes} == {"921", "922", "923", "930"}
     identities = {
         item.factor_id: (item.market_code, item.selection) for item in catalog.quotes
@@ -52,7 +54,7 @@ def test_parser_maps_only_verified_core_factor_semantics() -> None:
         "921": ("1x2", "P1"),
         "922": ("1x2", "X"),
         "923": ("1x2", "P2"),
-        "930": ("total", "TB(2.5)"),
+        "930": ("total", "over"),  # normalized format
     }
 
 

@@ -3,9 +3,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
+from typing import Any
 
 from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.dialects.postgresql import insert as postgresql_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.backtest.settlement import settle_market
@@ -60,7 +62,9 @@ class SettlementWorker:
         skipped_unsupported_market = 0
         timestamp = settled_at or datetime.now(UTC)
         for signal, prediction, odds, result, event_match in rows:
-            stake = signal.suggested_stake
+            # The alert freezes its actual bankroll-derived amount.  Legacy
+            # signals fall back to the former strategy-unit stake.
+            stake = signal.stake_amount or signal.suggested_stake
             if stake is None or stake <= 0:
                 skipped_without_stake += 1
                 continue
@@ -73,39 +77,38 @@ class SettlementWorker:
                     reversed_sides = bool(event_match.components.get("reversed_sides"))
                 if reversed_sides:
                     score1, score2 = score2, score1
-                outcome = settle_market(
+                outcome: str = settle_market(
                     prediction.selection,
                     score1=score1,
                     score2=score2,
+                    market=prediction.market_code,
+                    line=odds.line,
                 )
             except ValueError:
+                # A delivered historical call must not remain pending forever
+                # after a parser/market contract changes.  Void returns stake.
                 skipped_unsupported_market += 1
-                continue
+                outcome = "void"
+            settlement_odds = prediction.display_odds or odds.odds
             if outcome == "win":
-                payout = stake * odds.odds
-            elif outcome == "return":
+                payout = stake * settlement_odds
+            elif outcome in {"return", "void"}:
                 payout = stake
             else:
                 payout = Decimal(0)
-            settlement = Settlement(
-                signal_id=signal.id,
-                result_id=result.id,
-                outcome=outcome,
-                stake=stake,
-                payout=payout,
-                profit=payout - stake,
-                settled_at=timestamp,
+            inserted = await self._insert_settlement_atomic(
+                session,
+                values={
+                    "signal_id": signal.id,
+                    "result_id": result.id,
+                    "outcome": outcome,
+                    "stake": stake,
+                    "payout": payout,
+                    "profit": payout - stake,
+                    "settled_at": timestamp,
+                },
             )
-            # The scheduler and an operator may run settlement at the same time.
-            # The unique signal_id index is the source of truth; isolate a race
-            # in a SAVEPOINT so one duplicate cannot roll back the whole batch.
-            try:
-                async with session.begin_nested():
-                    session.add(settlement)
-                    await session.flush()
-            except IntegrityError as exc:
-                if not self._is_duplicate_settlement(exc):
-                    raise
+            if not inserted:
                 continue
             settled += 1
         return SettlementBatch(
@@ -116,9 +119,23 @@ class SettlementWorker:
         )
 
     @staticmethod
-    def _is_duplicate_settlement(exc: IntegrityError) -> bool:
-        message = str(exc).casefold()
-        return (
-            "ix_settlements_signal_id" in message
-            or "settlements.signal_id" in message
-        )
+    async def _insert_settlement_atomic(
+        session: AsyncSession,
+        *,
+        values: dict[str, object],
+    ) -> bool:
+        if session.bind is None:
+            raise RuntimeError("session is not bound to a database engine")
+        statement: Any
+        if session.bind.dialect.name == "postgresql":
+            statement = postgresql_insert(Settlement).values(**values)
+        elif session.bind.dialect.name == "sqlite":
+            statement = sqlite_insert(Settlement).values(**values)
+        else:  # pragma: no cover - supported deployments use PostgreSQL/SQLite
+            raise RuntimeError(
+                f"unsupported database dialect: {session.bind.dialect.name}"
+            )
+        statement = statement.on_conflict_do_nothing(
+            index_elements=[Settlement.signal_id]
+        ).returning(Settlement.id)
+        return (await session.scalar(statement)) is not None

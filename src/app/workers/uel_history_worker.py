@@ -114,16 +114,18 @@ class UELHistoryCollector:
         archives: list[ArchivedPayload] = [discovery_archive]
         persistence_inputs: list[UELHistoryInput] = []
         for tour, data_payload in zip(selected, data_payloads, strict=True):
-            if isinstance(data_payload, asyncio.CancelledError):
+            if isinstance(data_payload, BaseException):
+                if isinstance(data_payload, asyncio.CancelledError):
+                    raise data_payload
+                if isinstance(data_payload, Exception):
+                    LOGGER.warning(
+                        "UEL tour-data fetch failed external_id=%s name=%s: %s",
+                        tour.external_id,
+                        tour.name,
+                        data_payload,
+                    )
+                    continue
                 raise data_payload
-            if isinstance(data_payload, Exception):
-                LOGGER.warning(
-                    "UEL tour-data fetch failed external_id=%s name=%s: %s",
-                    tour.external_id,
-                    tour.name,
-                    data_payload,
-                )
-                continue
             try:
                 data_archive = self._archive.archive(data_payload)
                 history = parse_uel_tournament_history(

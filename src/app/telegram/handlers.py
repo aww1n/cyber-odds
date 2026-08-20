@@ -39,6 +39,7 @@ def _limit(command: CommandObject, *, default: int = 10) -> int:
 
 def _backtest_summary(output_dir: Path) -> str:
     lines = ["Последний probability backtest:"]
+    has_market_backtest = False
     for name, label in (
         ("baseline_backtest.json", "Best baseline"),
         ("ml_v1_backtest.json", "Logistic ML v1"),
@@ -61,7 +62,15 @@ def _backtest_summary(output_dir: Path) -> str:
             f"{escape(label)}: LogLoss {metrics['log_loss']:.4f}, "
             f"Brier {metrics['brier_score']:.4f}, n={metrics['predictions']}"
         )
-    lines.extend(("", "ROI не считается без подтверждённых исторических рынков Fonbet."))
+        if name.startswith("baseline"):
+            for market, market_metrics in payload.get("market_backtest", {}).items():
+                has_market_backtest = True
+                lines.append(
+                    f"{escape(market)}: bets {market_metrics['bets']}, "
+                    f"ROI {market_metrics['roi_percent']}%"
+                )
+    if not has_market_backtest:
+        lines.extend(("", "Нет подтверждённых matched pre-match рынков для ROI."))
     return "\n".join(lines)
 
 
@@ -186,11 +195,32 @@ def build_router(
         await message.answer(
             "Recent signals:\n"
             + "\n".join(
-                f"{item.created_at:%m-%d %H:%M} {escape(item.decision.upper())} "
+                f"{item.started_at:%m-%d %H:%M} {escape(item.decision.upper())} "
                 f"{escape(item.model)} {escape(item.selection)} @{item.odds:.2f} "
                 f"value {item.value_percent:+.1f}% [{escape(item.external_id)}]"
                 for item in rows
             )
+        )
+
+    @router.message(Command("analysis"))
+    async def analysis(message: Message) -> None:
+        async with sessions() as session:
+            view = await repository.analysis_summary(session)
+        reasons = (
+            "\n".join(
+                f"• {escape(reason)}: {count}"
+                for reason, count in view.top_skip_reasons
+            )
+            or "• нет"
+        )
+        await message.answer(
+            "Анализ решений:\n"
+            f"Прогнозов: {view.predictions}\n"
+            f"Alerts: {view.alerts}\n"
+            f"Skip: {view.skips}\n"
+            f"1X2 candidates: {view.one_x_two_candidates}\n"
+            f"TOTAL candidates: {view.total_candidates}\n\n"
+            f"Топ причин skip:\n{reasons}"
         )
 
     @router.message(Command("results"))

@@ -7,11 +7,10 @@ from datetime import UTC, datetime
 
 from aiogram import Bot
 from aiogram.exceptions import TelegramBadRequest
-from aiogram.types import ReplyParameters
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.telegram.formatter import format_settlement, format_signal_alert
-from app.telegram.repository import TelegramRepository
+from app.telegram.repository import PendingAlert, PendingSettlement, TelegramRepository
 
 LOGGER = logging.getLogger(__name__)
 
@@ -31,13 +30,15 @@ class TelegramPublisher:
         chat_id: int,
         sessions: async_sessionmaker[AsyncSession],
         repository: TelegramRepository | None = None,
+        alert_window_minutes: int | None = None,
     ) -> None:
         self._bot = bot
         self._chat_id = chat_id
         self._sessions = sessions
         self._repository = repository or TelegramRepository()
+        self._alert_window_minutes = alert_window_minutes
 
-    async def _send_alert(self, alert) -> bool:
+    async def _send_alert(self, alert: PendingAlert) -> bool:
         text = format_signal_alert(alert.view)
         try:
             message = await self._bot.send_message(
@@ -109,22 +110,27 @@ class TelegramPublisher:
         )
         return True
 
-    async def _send_settlement(self, settlement) -> bool:
+    async def _send_settlement(self, settlement: PendingSettlement) -> bool:
+        text = format_settlement(settlement.view)
         try:
-            # Replace the original signal message with the final result.
-            # This keeps one Telegram post per prediction lifecycle:
-            # signal before match -> final score/result after match.
             if settlement.reply_to_message_id:
-                await self._bot.edit_message_text(
-                    chat_id=self._chat_id,
-                    message_id=settlement.reply_to_message_id,
-                    text=format_settlement(settlement.view),
-                )
+                try:
+                    await self._bot.edit_message_text(
+                        chat_id=self._chat_id,
+                        message_id=settlement.reply_to_message_id,
+                        text=text,
+                    )
+                except Exception:
+                    LOGGER.warning(
+                        "Telegram settlement edit failed; sending fallback "
+                        "settlement_id=%s message_id=%s",
+                        settlement.settlement_id,
+                        settlement.reply_to_message_id,
+                        exc_info=True,
+                    )
+                    await self._bot.send_message(chat_id=self._chat_id, text=text)
             else:
-                await self._bot.send_message(
-                    chat_id=self._chat_id,
-                    text=format_settlement(settlement.view),
-                )
+                await self._bot.send_message(chat_id=self._chat_id, text=text)
         except Exception:
             LOGGER.exception(
                 "Telegram settlement update failed settlement_id=%s chat_id=%s",
@@ -157,7 +163,11 @@ class TelegramPublisher:
         now = datetime.now(UTC)
         async with self._sessions.begin() as session:
             expired = await self._repository.expire_pending_alerts(session, now=now)
-            alerts = await self._repository.pending_alerts(session, now=now)
+            alerts = await self._repository.pending_alerts(
+                session,
+                now=now,
+                alert_window_minutes=self._alert_window_minutes,
+            )
             settlements = await self._repository.pending_settlements(session)
 
         if expired or alerts or settlements:

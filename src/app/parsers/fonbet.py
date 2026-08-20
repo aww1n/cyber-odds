@@ -138,6 +138,11 @@ def _factor_identity(
     factor_id: int,
     line: Decimal | None,
 ) -> tuple[str, str, str]:
+    """Return (market_code, market_name, normalized_selection).
+
+    For totals: use normalized selection 'over'/'under' without embedding line.
+    For handicaps: keep legacy format for backward compatibility.
+    """
     fixed = {
         921: ("1x2", "Full time result", "P1"),
         922: ("1x2", "Full time result", "X"),
@@ -150,8 +155,9 @@ def _factor_identity(
         parameterized = {
             927: ("handicap", "Full time handicap", f"F1({rendered_line})"),
             928: ("handicap", "Full time handicap", f"F2({rendered_line})"),
-            930: ("total", "Full time total", f"TB({rendered_line})"),
-            931: ("total", "Full time total", f"TM({rendered_line})"),
+            # TOTALS: normalized selection without line embedding
+            930: ("total", "Full time total", "over"),
+            931: ("total", "Full time total", "under"),
         }
         if factor_id in parameterized:
             return parameterized[factor_id]

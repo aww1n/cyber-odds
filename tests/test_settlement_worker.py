@@ -118,6 +118,7 @@ async def test_worker_settles_matched_alert_at_the_exact_prediction_snapshot(
             fair_odds=Decimal("1.81818"),
             value_ratio=Decimal("1.1825"),
             value_percent=Decimal("18.25"),
+            display_odds=Decimal("2.18"),
             features={},
             anomaly_flags=[],
             feature_cutoff_at=now,
@@ -132,6 +133,7 @@ async def test_worker_settles_matched_alert_at_the_exact_prediction_snapshot(
             minimum_odds=Decimal("2.00"),
             safety_multiplier=Decimal("1.10"),
             suggested_stake=Decimal("100"),
+            stake_amount=Decimal("150"),
             filter_reasons=[],
             created_at=now,
             sent_at=now,
@@ -147,9 +149,9 @@ async def test_worker_settles_matched_alert_at_the_exact_prediction_snapshot(
     assert batch.settled == 1
     assert stored is not None
     assert stored.outcome == "win"
-    assert stored.stake == Decimal("100.00")
-    assert stored.payout == Decimal("215.00")
-    assert stored.profit == Decimal("115.00")
+    assert stored.stake == Decimal("150.00")
+    assert stored.payout == Decimal("327.00")
+    assert stored.profit == Decimal("177.00")
     await engine.dispose()
 
 

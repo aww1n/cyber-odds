@@ -9,7 +9,8 @@
 backtester реализованы. Logistic Regression v1 с validation-only калибровкой
 проверена и оказалась хуже простого baseline, поэтому не допущена к сигналам.
 Семь базовых factor ID Fonbet подтверждены на текущей официальной странице, live
-predictions/signals, settlement, Telegram и Docker Compose реализованы. В текущем
+predictions/signals для 1X2 и тоталов, line-aware статистические коридоры, settlement,
+Telegram и Docker Compose реализованы. В текущем
 операционном профиле UEL eFootball алерты включены для forward-наблюдения, но
 прибыльность стратегии не доказана и автоматического размещения ставок в проекте нет.
 В текущем Fonbet line JSON подтверждён live-счёт, но не terminal status, поэтому
@@ -40,6 +41,10 @@ SIS_H2H_ENABLED=true uv run python -m app backfill --source sis-h2h --date 2026-
 uv run python -m app normalize --source uel_ef
 uv run python -m app normalize --source fonbet
 uv run python -m app match-events --historical-source uel_ef
+uv run python -m app db-audit
+uv run python -m app build-corridors
+uv run python -m app corridor-progress
+uv run python -m app corridor-stats
 DATABASE_URL=sqlite+aiosqlite:///data/research.sqlite3 uv run python -m app backtest
 DATABASE_URL=sqlite+aiosqlite:///data/research.sqlite3 uv run python -m app train
 DATABASE_URL=sqlite+aiosqlite:///data/research.sqlite3 uv run python -m app predict
@@ -80,9 +85,10 @@ uv run mypy
 
 `backtest` строит признаки заново для каждого события со строгим cutoff и запускает
 rolling walk-forward. Он отдельно сравнивает окна 5/10/20/25/30/50/75/100/200/all.
-Текущий отчёт является probability-only: ROI не вычисляется, потому что собственной
-исторической линии нет на всём OOS-интервале. Это явно указано в JSON-отчёте, чтобы
-статистическое качество не выдавалось за доходность.
+Probability-метрики считаются по всему допустимому OOS-интервалу; ROI для 1X2 и
+тоталов считается только там, где есть сопоставленный свежий prematch odds snapshot.
+Отчёт явно разделяет эти выборки, чтобы статистическое качество не выдавалось за
+доходность.
 
 `train` требует установку `uv sync --extra dev --extra ml`. В каждом fold модель
 обучается на train, метод калибровки выбирается только на следующем validation и
@@ -90,7 +96,9 @@ rolling walk-forward. Он отдельно сравнивает окна 5/10/2
 [`docs/ml-v1-backtest.md`](docs/ml-v1-backtest.md).
 
 `predict` берёт только автоматически matched будущие события и конкретный сохранённый
-odds snapshot. Cutoff признаков равен времени получения этого snapshot, даже если время
+odds snapshot. 1X2 и тоталы имеют отдельные вероятностные модели и стратегии; линия
+тотала является частью prediction, corridor и alert identity. Cutoff признаков равен
+времени получения этого snapshot, даже если время
 начала у UEL и Fonbet расходится. Каждый прогноз получает запись `alert` или `skip`;
 прогноз также хранит точный `event_match_id` и frozen `mapping_reversed_sides`, чтобы
 settlement не мог выбрать результат другого источника или изменить ориентацию P1/P2 после
@@ -106,7 +114,8 @@ forward-наблюдения. Это не является подтвержде�
 к явной ошибке контейнера вместо ситуации, когда polling работает, а сигналы молча не
 доставляются. Один неотправляемый сигнал не блокирует очередь остальных. Publisher
 логирует pending/sent/expired delivery cycles. Поддержаны `/status`, `/stats`, `/today`,
-`/models`, `/model`, `/signals`, `/results`, `/bank`, `/backtest`, `/parsers`, `/errors`.
+`/models`, `/model`, `/signals`, `/results`, `/bank`, `/backtest`, `/analysis`,
+`/parsers`, `/errors`.
 Реальные ставки нигде не выполняются.
 
 History worker всегда обновляет первую страницу UEL и параллельно циклически проходит

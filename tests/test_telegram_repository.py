@@ -197,10 +197,17 @@ async def test_repository_delivers_each_alert_and_settlement_from_persisted_rows
     repository = TelegramRepository()
     async with sessions() as session:
         alerts = await repository.pending_alerts(session, now=now)
+        too_early = await repository.pending_alerts(
+            session,
+            now=now,
+            alert_window_minutes=10,
+        )
         settlements_before_alert = await repository.pending_settlements(session)
     assert len(alerts) == 1
+    assert too_early == ()
     assert alerts[0].view.calculation_odds == Decimal("2.15000")
     assert alerts[0].view.display_odds == Decimal("2.18000")
+    assert alerts[0].view.signal_id == alerts[0].signal_id
     assert settlements_before_alert == ()
 
     async with sessions.begin() as session:
@@ -299,4 +306,110 @@ async def test_repository_expires_unsent_alerts_before_event_or_after_quote_expi
     assert stored.alert_key is None
     assert "delivery_expired" in stored.filter_reasons
     assert pending == ()
+    await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_pending_alert_window_rejects_started_and_sorts_nearest_first(
+    tmp_path: Path,
+) -> None:
+    engine = build_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'telegram-window.db'}")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    sessions = build_session_factory(engine)
+    now = datetime(2026, 8, 20, 12, tzinfo=UTC)
+
+    async with sessions.begin() as session:
+        source = Source(code="fonbet", name="Fonbet", source_type="bookmaker")
+        session.add(source)
+        await session.flush()
+        raw = RawPayload(
+            source_id=source.id,
+            endpoint="https://verified.example/listBase",
+            http_status=200,
+            content_sha256="f" * 64,
+            storage_path="telegram-window.json",
+            response_headers={},
+            received_at=now,
+        )
+        session.add(raw)
+        await session.flush()
+
+        for label, minutes in (("later", 8), ("early", 11), ("started", -1), ("near", 5)):
+            event = Event(
+                external_id=f"event-{label}",
+                source_id=source.id,
+                sport="football",
+                started_at=now + timedelta(minutes=minutes),
+                status="scheduled" if minutes > 0 else "live",
+                raw_payload_id=raw.id,
+            )
+            session.add(event)
+            await session.flush()
+            market = Market(
+                event_id=event.id,
+                external_id=f"market-{label}",
+                code="1x2",
+                name="1X2",
+            )
+            session.add(market)
+            await session.flush()
+            odds = OddsSnapshot(
+                event_id=event.id,
+                bookmaker_source_id=source.id,
+                market_id=market.id,
+                selection="P1",
+                odds=Decimal("2"),
+                received_at=now - timedelta(seconds=30),
+                raw_payload_id=raw.id,
+            )
+            session.add(odds)
+            await session.flush()
+            prediction = ModelPrediction(
+                event_id=event.id,
+                event_match_id=None,
+                mapping_reversed_sides=None,
+                odds_snapshot_id=odds.id,
+                model_name="baseline",
+                model_version="window-v1",
+                market_code="1x2",
+                selection="P1",
+                probability=Decimal("0.6"),
+                fair_odds=Decimal("1.66667"),
+                value_ratio=Decimal("1.2"),
+                value_percent=Decimal("20"),
+                display_odds=Decimal("2"),
+                sample_size=20,
+                features={},
+                anomaly_flags=[],
+                feature_cutoff_at=odds.received_at,
+                created_at=now,
+            )
+            session.add(prediction)
+            await session.flush()
+            session.add(
+                Signal(
+                    prediction_id=prediction.id,
+                    decision="alert",
+                    strategy="window",
+                    alert_key=f"window:{event.external_id}:1x2:P1:-",
+                    minimum_odds=Decimal("1.8"),
+                    safety_multiplier=Decimal("1.08"),
+                    filter_reasons=[],
+                    expires_at=event.started_at,
+                    created_at=now,
+                )
+            )
+
+    repository = TelegramRepository()
+    async with sessions.begin() as session:
+        expired = await repository.expire_pending_alerts(session, now=now)
+        pending = await repository.pending_alerts(
+            session,
+            now=now,
+            alert_window_minutes=10,
+        )
+
+    assert expired == 1
+    assert [item.view.external_id for item in pending] == ["event-near", "event-later"]
     await engine.dispose()

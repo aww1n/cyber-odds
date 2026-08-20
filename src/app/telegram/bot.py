@@ -109,6 +109,7 @@ async def run_telegram_bot(settings: Settings) -> None:
         bot=bot,
         chat_id=settings.alert_chat_id,
         sessions=sessions,
+        alert_window_minutes=settings.alert_minutes_before_start,
     )
     # Attempt any already-persisted alerts immediately instead of waiting for
     # the first publisher interval.

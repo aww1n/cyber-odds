@@ -61,7 +61,9 @@ def analyze_observation(record: dict[str, Any]) -> dict[str, Any]:
     )
     shown_value_percent = shown_value * 100.0 if shown_value is not None else None
     predicted_bet_multiplier = (
-        observed_ml_bet_multiplier(value_ratio) if value_ratio is not None else None
+        float(observed_ml_bet_multiplier(value_ratio))
+        if value_ratio is not None
+        else None
     )
     safety_multiplier = (
         minimum_odds / fair if minimum_odds is not None and fair is not None else None
@@ -118,4 +120,3 @@ def analyze_file(input_path: Path, output_dir: Path) -> AnalysisOutputs:
             writer.writerows(records)
 
     return AnalysisOutputs(row_count=len(records), csv_path=csv_path, json_path=json_path)
-

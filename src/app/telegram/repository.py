@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 from sqlalchemy import and_, func, or_, select
@@ -47,6 +48,7 @@ class PendingSettlement:
 @dataclass(frozen=True, slots=True)
 class SignalSummary:
     created_at: datetime
+    started_at: datetime
     decision: str
     strategy: str
     model: str
@@ -87,7 +89,46 @@ class DataTotals:
     predictions: int
 
 
+@dataclass(frozen=True, slots=True)
+class AnalysisSummary:
+    predictions: int
+    alerts: int
+    skips: int
+    one_x_two_candidates: int
+    total_candidates: int
+    top_skip_reasons: tuple[tuple[str, int], ...]
+
+
 class TelegramRepository:
+    async def analysis_summary(self, session: AsyncSession) -> AnalysisSummary:
+        predictions = int(
+            await session.scalar(select(func.count(ModelPrediction.id))) or 0
+        )
+        market_rows = (
+            await session.execute(
+                select(ModelPrediction.market_code, func.count(ModelPrediction.id))
+                .group_by(ModelPrediction.market_code)
+            )
+        ).all()
+        markets = {str(market): int(count) for market, count in market_rows}
+        signals = (await session.scalars(select(Signal))).all()
+        alerts = sum(item.decision == "alert" for item in signals)
+        skips = sum(item.decision == "skip" for item in signals)
+        reasons = Counter(
+            reason
+            for item in signals
+            if item.decision == "skip"
+            for reason in (item.filter_reasons or [])
+        )
+        return AnalysisSummary(
+            predictions=predictions,
+            alerts=alerts,
+            skips=skips,
+            one_x_two_candidates=markets.get("1x2", 0),
+            total_candidates=markets.get("total", 0),
+            top_skip_reasons=tuple(reasons.most_common(10)),
+        )
+
     async def data_totals(self, session: AsyncSession) -> DataTotals:
         return DataTotals(
             events=int(await session.scalar(select(func.count(Event.id))) or 0),
@@ -110,46 +151,63 @@ class TelegramRepository:
         *,
         limit: int = 50,
         now: datetime | None = None,
+        alert_window_minutes: int | None = None,
     ) -> tuple[PendingAlert, ...]:
+        """Retrieve unsent alerts within the configured time window.
+
+        Args:
+            alert_window_minutes: Only return alerts for events starting within
+                this many minutes from now. None = no window constraint.
+        """
         current = self._aware(now or datetime.now(UTC))
         participant1 = aliased(EventParticipant)
         participant2 = aliased(EventParticipant)
         bookmaker = aliased(Source)
-        rows = (
-            await session.execute(
-                select(
-                    Signal,
-                    ModelPrediction,
-                    OddsSnapshot,
-                    Event,
-                    Tournament.name,
-                    participant1.raw_name,
-                    participant2.raw_name,
-                    bookmaker.code,
-                )
-                .join(ModelPrediction, ModelPrediction.id == Signal.prediction_id)
-                .join(OddsSnapshot, OddsSnapshot.id == ModelPrediction.odds_snapshot_id)
-                .join(Event, Event.id == ModelPrediction.event_id)
-                .join(bookmaker, bookmaker.id == OddsSnapshot.bookmaker_source_id)
-                .outerjoin(Tournament, Tournament.id == Event.tournament_id)
-                .outerjoin(
-                    participant1,
-                    and_(participant1.event_id == Event.id, participant1.side == 1),
-                )
-                .outerjoin(
-                    participant2,
-                    and_(participant2.event_id == Event.id, participant2.side == 2),
-                )
-                .where(
-                    Signal.decision == "alert",
-                    Signal.sent_at.is_(None),
-                    Event.started_at > current,
-                    or_(Signal.expires_at.is_(None), Signal.expires_at > current),
-                )
-                .order_by(Signal.created_at, Signal.id)
-                .limit(limit)
+
+        # Build base query
+        query = (
+            select(
+                Signal,
+                ModelPrediction,
+                OddsSnapshot,
+                Event,
+                Tournament.name,
+                participant1.raw_name,
+                participant2.raw_name,
+                participant1.raw_team_name,
+                participant2.raw_team_name,
+                bookmaker.code,
             )
-        ).all()
+            .join(ModelPrediction, ModelPrediction.id == Signal.prediction_id)
+            .join(OddsSnapshot, OddsSnapshot.id == ModelPrediction.odds_snapshot_id)
+            .join(Event, Event.id == ModelPrediction.event_id)
+            .join(bookmaker, bookmaker.id == OddsSnapshot.bookmaker_source_id)
+            .outerjoin(Tournament, Tournament.id == Event.tournament_id)
+            .outerjoin(
+                participant1,
+                and_(participant1.event_id == Event.id, participant1.side == 1),
+            )
+            .outerjoin(
+                participant2,
+                and_(participant2.event_id == Event.id, participant2.side == 2),
+            )
+            .where(
+                Signal.decision == "alert",
+                Signal.sent_at.is_(None),
+                Event.started_at > current,
+                or_(Signal.expires_at.is_(None), Signal.expires_at > current),
+            )
+        )
+
+        # Apply time window constraint if specified
+        if alert_window_minutes is not None:
+            max_start = current + timedelta(minutes=alert_window_minutes)
+            query = query.where(Event.started_at <= max_start)
+
+        # Order by event time (earliest first) then signal creation
+        query = query.order_by(Event.started_at, Signal.id).limit(limit)
+
+        rows = (await session.execute(query)).all()
         return tuple(
             PendingAlert(
                 signal_id=signal.id,
@@ -157,7 +215,7 @@ class TelegramRepository:
                     source_tag=source_code,
                     sport=event.sport,
                     started_at=self._aware(event.started_at),
-                    tournament=tournament_name or "Unknown tournament",
+                    tournament=tournament_name or "",
                     event_format=event.format,
                     participant1=raw_player1 or "P1",
                     participant2=raw_player2 or "P2",
@@ -173,8 +231,20 @@ class TelegramRepository:
                     bet_multiplier=signal.bet_multiplier,
                     suggested_stake=signal.suggested_stake,
                     sample_size=prediction.sample_size,
-                    model=f"{prediction.model_name}:{prediction.model_version}",
+                    model=f"{prediction.model_name} / {prediction.model_version}",
                     external_id=event.external_id,
+                    bankroll_at_signal=signal.bankroll_at_signal,
+                    stake_percent=signal.stake_percent,
+                    stake_amount=signal.stake_amount,
+                    game=event.game,
+                    team1=raw_team1,
+                    team2=raw_team2,
+                    corridor=(
+                        prediction.features.get("corridor")
+                        if isinstance(prediction.features.get("corridor"), dict)
+                        else None
+                    ),
+                    signal_id=signal.id,
                 ),
             )
             for (
@@ -185,6 +255,8 @@ class TelegramRepository:
                 tournament_name,
                 raw_player1,
                 raw_player2,
+                raw_team1,
+                raw_team2,
                 source_code,
             ) in rows
         )
@@ -307,6 +379,8 @@ class TelegramRepository:
                         payout=settlement.payout,
                         outcome=settlement.outcome,
                         profit=settlement.profit,
+                        market=prediction.market_code,
+                        line=odds.line,
                     ),
                 )
             )
@@ -406,18 +480,28 @@ class TelegramRepository:
     ) -> tuple[SignalSummary, ...]:
         rows = (
             await session.execute(
-                select(Signal, ModelPrediction, OddsSnapshot.odds, Event.external_id)
+                select(
+                    Signal,
+                    ModelPrediction,
+                    OddsSnapshot.odds,
+                    Event.external_id,
+                    Event.started_at,
+                )
                 .join(ModelPrediction, ModelPrediction.id == Signal.prediction_id)
                 .join(OddsSnapshot, OddsSnapshot.id == ModelPrediction.odds_snapshot_id)
                 .join(Event, Event.id == ModelPrediction.event_id)
-                .where(Signal.decision == "alert")
-                .order_by(Signal.created_at.desc(), Signal.id.desc())
+                .where(
+                    Signal.decision == "alert",
+                    Event.started_at > datetime.now(UTC),
+                )
+                .order_by(Event.started_at, Signal.id)
                 .limit(limit)
             )
         ).all()
         return tuple(
             SignalSummary(
                 created_at=self._aware(signal.created_at),
+                started_at=self._aware(started_at),
                 decision=signal.decision,
                 strategy=signal.strategy,
                 model=prediction.model_name,
@@ -426,7 +510,7 @@ class TelegramRepository:
                 value_percent=prediction.value_percent,
                 external_id=external_id,
             )
-            for signal, prediction, odds, external_id in rows
+            for signal, prediction, odds, external_id, started_at in rows
         )
 
     async def recent_results(

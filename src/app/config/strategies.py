@@ -30,10 +30,14 @@ class StrategySettings(BaseModel):
     max_odds: float = Field(default=100.0, gt=1)
     min_probability: float = Field(default=0.0, ge=0, le=1)
     max_probability: float = Field(default=1.0, ge=0, le=1)
+    min_value_percent: float = Field(default=0.0, ge=0)
     min_match_confidence: float = Field(default=0.90, ge=0, le=1)
     stale_after_seconds: float = Field(default=120.0, gt=0)
     min_alert_lead_seconds: float = Field(default=15.0, ge=0, le=600)
     suspicious_edge_percent: float = Field(default=50.0, gt=0)
+    corridor_required_for_alert: bool = False
+    corridor_min_samples: int = Field(default=20, gt=0)
+    max_alerts_per_event: int = Field(default=1, gt=0, le=10)
     allowed_markets: tuple[str, ...] = ()
     allowed_tournaments: tuple[str, ...] = ()
 
@@ -57,6 +61,7 @@ class StrategySettings(BaseModel):
                 max_odds=self.max_odds,
                 min_probability=self.min_probability,
                 max_probability=self.max_probability,
+                min_value_percent=self.min_value_percent,
                 allowed_markets=frozenset(self.allowed_markets),
                 allowed_tournaments=frozenset(self.allowed_tournaments),
                 min_match_confidence=self.min_match_confidence,

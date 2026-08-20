@@ -52,6 +52,56 @@ def test_alert_keeps_calculation_snapshot_distinct_from_display_odds() -> None:
     assert "h2h_ef_123" in text
 
 
+def test_total_alert_contains_line_bankroll_corridor_and_exact_path() -> None:
+    now = datetime(2026, 8, 17, 16, 40, tzinfo=UTC)
+    text = format_signal_alert(
+        SignalAlertView(
+            source_tag="fonbet",
+            sport="football",
+            started_at=now + timedelta(minutes=8),
+            tournament="UEL",
+            event_format=None,
+            participant1="A",
+            participant2="B",
+            market="total",
+            selection="over",
+            line=Decimal("3.5"),
+            calculation_odds=Decimal("1.92"),
+            display_odds=None,
+            probability=Decimal("0.584"),
+            fair_odds=Decimal("1.7123"),
+            value_percent=Decimal("12.128"),
+            minimum_odds=Decimal("1.80"),
+            bet_multiplier=Decimal("1"),
+            suggested_stake=Decimal("1"),
+            sample_size=950,
+            model="poisson_goals:totals_v1",
+            external_id="event-total",
+            bankroll_at_signal=Decimal("100000"),
+            stake_percent=Decimal("1.5"),
+            stake_amount=Decimal("1500"),
+            game="FC26",
+            corridor={
+                "status": "confirm",
+                "odds_min": "1.75",
+                "odds_max": "2.00",
+                "sample_size": 712,
+                "win_rate": "0.567",
+                "roi_percent": "4.3",
+            },
+        ),
+        now=now,
+    )
+
+    assert "До матча: 8 мин" in text
+    assert "Ставка: ТБ 3.5" in text
+    assert "Банк: 100 000 ₽" in text
+    assert "Сумма: 1 500 ₽" in text
+    assert "Выборка: 712" in text
+    assert "📊 Коридор:\nТБ 3.5" in text
+    assert "FONBET\n→ FC26\n→ UEL\n→ A — B\n→ Тотал\n→ ТБ 3.5" in text
+
+
 def test_settlement_and_daily_stats_include_returns_and_virtual_pnl() -> None:
     settlement = format_settlement(
         SettlementView(

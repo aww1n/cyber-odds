@@ -9,6 +9,7 @@ from app.database import Base, build_async_engine
 from app.database import models as database_models  # noqa: F401
 
 EXPECTED_TABLES = {
+    "corridor_observations",
     "event_matches",
     "event_participants",
     "events",
@@ -16,6 +17,7 @@ EXPECTED_TABLES = {
     "model_predictions",
     "normalization_reviews",
     "odds_snapshots",
+    "odds_corridors",
     "parser_runs",
     "player_aliases",
     "players",
@@ -41,6 +43,7 @@ def test_schema_contains_required_tables_and_indexes() -> None:
     assert {index.name for index in Base.metadata.tables["odds_snapshots"].indexes} >= {
         "ix_odds_snapshots_event_id",
         "ix_odds_snapshots_received_at",
+        "ix_odds_contract_received",
     }
     assert "ix_model_predictions_event_id" in {
         index.name for index in Base.metadata.tables["model_predictions"].indexes
@@ -70,8 +73,17 @@ def test_schema_contains_required_tables_and_indexes() -> None:
     assert "alert_key" in Base.metadata.tables["signals"].columns
     assert "expires_at" in Base.metadata.tables["signals"].columns
     assert "mapping_reversed_sides" in Base.metadata.tables["model_predictions"].columns
+    assert "returns" in Base.metadata.tables["odds_corridors"].columns
+    assert "line" in Base.metadata.tables["corridor_observations"].columns
     assert "ux_signals_alert_key" in {
         index.name for index in Base.metadata.tables["signals"].indexes
+    }
+    assert {
+        "ux_event_matches_matched_source",
+        "ux_event_matches_matched_bookmaker",
+    } <= {index.name for index in Base.metadata.tables["event_matches"].indexes}
+    assert "ux_corridor_observation_contract" in {
+        index.name for index in Base.metadata.tables["corridor_observations"].indexes
     }
 
 
