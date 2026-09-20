@@ -1,5 +1,9 @@
 # Cyber Odds Research
 
+[![CI](https://github.com/aww1n/cyber-odds/actions/workflows/ci.yml/badge.svg)](https://github.com/aww1n/cyber-odds/actions/workflows/ci.yml)
+[![Python 3.12+](https://img.shields.io/badge/Python-3.12%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![Docker](https://img.shields.io/badge/Docker-ready-2496ED?logo=docker&logoColor=white)](https://www.docker.com/)
+
 Система для воспроизводимого сбора и исследования коэффициентов на киберфутбол и
 киберхоккей. Проект развивается по этапам: сначала подтверждение данных и формул,
 затем хранение и collectors, normalization, baseline/backtest, и только после этого ML.
@@ -15,6 +19,35 @@ Telegram и Docker Compose реализованы. В текущем
 прибыльность стратегии не доказана и автоматического размещения ставок в проекте нет.
 В текущем Fonbet line JSON подтверждён live-счёт, но не terminal status, поэтому
 исчезнувшие матчи не выдаются за рассчитанные результаты**.
+
+## Архитектура
+
+```mermaid
+flowchart LR
+    Sources[External data sources] --> Archive[Immutable raw archive]
+    Archive --> Normalize[Normalization]
+    Normalize --> Match[Cross-source event matching]
+    Match --> Features[Leakage-safe features]
+    Features --> Backtest[Walk-forward backtest]
+    Features --> Predict[Predictions and corridors]
+    Predict --> Settle[Settlement]
+    Predict --> Alerts[Telegram alerts]
+    Backtest --> Reports[Reproducible research reports]
+```
+
+Ключевой принцип проекта — любой прогноз строится только из данных, доступных на
+момент соответствующего odds snapshot. Сырые ответы архивируются до parsing, а
+backtest, обучение, прогноз и settlement разделены явными границами.
+
+## Что здесь можно оценить
+
+- воспроизводимый ingestion нескольких источников и сохранение raw evidence;
+- source-scoped identity и отдельный этап event matching;
+- rolling walk-forward без утечки будущих данных;
+- раздельная оценка вероятностных метрик и ROI на доступной odds-выборке;
+- идемпотентные predictions, alerts и settlement;
+- production-контур с PostgreSQL, Redis, Docker Compose и health checks;
+- тесты парсеров, репозиториев, matching, features, ML, Telegram и workers.
 
 ## Docker: рекомендуемый запуск
 
